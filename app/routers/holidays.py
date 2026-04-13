@@ -27,7 +27,7 @@ async def create_holiday(
     holiday_service: HolidayService = Depends(get_holiday_service),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     try:
@@ -63,7 +63,7 @@ async def update_holiday(
     holiday_service: HolidayService = Depends(get_holiday_service),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     before = await holiday_service.get_holiday_by_id(holiday_id)
@@ -103,7 +103,7 @@ async def delete_holiday(
     holiday_service: HolidayService = Depends(get_holiday_service),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     existing = await holiday_service.get_holiday_by_id(holiday_id)

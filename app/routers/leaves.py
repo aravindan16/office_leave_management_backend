@@ -29,8 +29,8 @@ async def create_leave_request(
     
     if leave.manager_id:
         manager = await user_service.get_user_by_id(str(leave.manager_id))
-        if not manager or not manager.is_manager:
-            raise HTTPException(status_code=400, detail="Invalid manager specified")
+        if not manager or not manager.is_admin:
+            raise HTTPException(status_code=400, detail="Invalid admin specified")
     else:
         managers = await user_service.get_managers()
         if not managers:
@@ -67,10 +67,7 @@ async def get_leaves(
 ):
     if current_user.is_admin:
         return await leave_service.get_all_leaves()
-    if current_user.is_manager:
-        return await leave_service.get_all_leaves()
-    else:
-        return await leave_service.get_leaves_by_employee(str(current_user.id))
+    return await leave_service.get_leaves_by_employee(str(current_user.id))
 
 @router.get("/my-leaves", response_model=List[Leave])
 async def get_my_leaves(
@@ -84,14 +81,12 @@ async def get_pending_leaves(
     current_user: UserInDB = Depends(get_current_active_user),
     leave_service: LeaveService = Depends(get_leave_service)
 ):
-    if not (current_user.is_manager or current_user.is_admin):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    if current_user.is_admin:
-        return await leave_service.get_pending_leaves()
-    return await leave_service.get_leaves_for_manager(str(current_user.id))
+    return await leave_service.get_pending_leaves()
 
 @router.put("/{leave_id}/approve", response_model=Leave)
 async def approve_leave(
@@ -102,7 +97,7 @@ async def approve_leave(
     user_service: UserService = Depends(get_user_service),
     log_service: ActivityLogService = Depends(get_activity_log_service)
 ):
-    if not (current_user.is_manager or current_user.is_admin):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -112,13 +107,6 @@ async def approve_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
 
-    if current_user.is_manager and not current_user.is_admin:
-        if not leave.manager_id or str(leave.manager_id) != str(current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only approve requests assigned to you"
-            )
-    
     updated_leave = await leave_service.update_leave_status(leave_id, LeaveStatus.APPROVED, manager_comment)
     if updated_leave:
         employee = await user_service.get_user_by_id(str(updated_leave.employee_id))
@@ -157,7 +145,7 @@ async def reject_leave(
     user_service: UserService = Depends(get_user_service),
     log_service: ActivityLogService = Depends(get_activity_log_service)
 ):
-    if not (current_user.is_manager or current_user.is_admin):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -167,13 +155,6 @@ async def reject_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
 
-    if current_user.is_manager and not current_user.is_admin:
-        if not leave.manager_id or str(leave.manager_id) != str(current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only reject requests assigned to you"
-            )
-    
     updated_leave = await leave_service.update_leave_status(leave_id, LeaveStatus.REJECTED, manager_comment)
     if updated_leave:
         employee = await user_service.get_user_by_id(str(updated_leave.employee_id))
@@ -215,7 +196,7 @@ async def cancel_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     
-    if str(leave.employee_id) != str(current_user.id) and not (current_user.is_manager or current_user.is_admin):
+    if str(leave.employee_id) != str(current_user.id) and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

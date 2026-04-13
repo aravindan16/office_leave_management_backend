@@ -14,7 +14,7 @@ async def create_user(
     current_user: UserInDB = Depends(get_current_active_user),
     user_service: UserService = Depends(get_user_service),
 ):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",
@@ -32,7 +32,7 @@ async def create_user(
 
 @router.get("/", response_model=List[User])
 async def get_users(current_user: UserInDB = Depends(get_current_active_user), user_service: UserService = Depends(get_user_service)):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -55,7 +55,7 @@ async def update_user(
     user_service: UserService = Depends(get_user_service),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
-    if current_user.id != user_id and not (current_user.is_manager or current_user.is_admin):
+    if current_user.id != user_id and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -86,7 +86,7 @@ async def update_user(
 
 @router.delete("/{user_id}")
 async def delete_user(user_id: str, current_user: UserInDB = Depends(get_current_active_user), user_service: UserService = Depends(get_user_service)):
-    if not (current_user.is_admin or current_user.is_manager):
+    if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",

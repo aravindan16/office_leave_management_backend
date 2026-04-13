@@ -17,6 +17,6 @@ async def get_activity_logs(
     current_user: UserInDB = Depends(get_current_active_user),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
-    if current_user.is_admin or current_user.is_manager:
+    if current_user.is_admin:
         return await log_service.get_logs(skip=skip, limit=limit)
     return await log_service.get_logs_for_user(str(current_user.id), skip=skip, limit=limit)

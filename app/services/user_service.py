@@ -95,7 +95,7 @@ class UserService:
 
     async def get_managers(self) -> List[User]:
         managers = []
-        async for user_data in self.collection.find({"is_manager": True, "is_active": True}):
+        async for user_data in self.collection.find({"is_admin": True, "is_active": True}):
             user_data["id"] = str(user_data.pop("_id"))
             managers.append(User(**user_data))
         return managers
