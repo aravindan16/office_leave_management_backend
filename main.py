@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import auth, users, leaves
 from app.routers import activity_logs
+from app.routers import holidays
 from app.core.database import connect_to_mongo, close_mongo_connection
 
 app = FastAPI(title="Office Leave Management API", version="1.0.0")
@@ -21,6 +22,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(leaves.router, prefix="/api/leaves", tags=["leaves"])
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["activity-logs"])
+app.include_router(holidays.router, prefix="/api/holidays", tags=["holidays"])
 
 @app.get("/")
 async def root():
