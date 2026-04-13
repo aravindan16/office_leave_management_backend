@@ -4,7 +4,7 @@ from app.models.user import User, UserInDB, UserCreate, UserUpdate
 from app.core.security import get_password_hash, verify_password
 from app.core.database import get_database
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, date, time
 
 class UserService:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -58,16 +58,21 @@ class UserService:
             return None
         
         update_data = user_data.dict(exclude_unset=True)
+
+        dob = update_data.get("date_of_birth")
+        if isinstance(dob, date) and not isinstance(dob, datetime):
+            update_data["date_of_birth"] = datetime.combine(dob, time.min)
+
         update_data["updated_at"] = datetime.utcnow()
         
         result = await self.collection.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": update_data}
         )
-        
-        if result.modified_count:
-            return await self.get_user_by_id(user_id)
-        return None
+
+        if result.matched_count == 0:
+            return None
+        return await self.get_user_by_id(user_id)
 
     async def get_all_users(self) -> List[User]:
         users = []

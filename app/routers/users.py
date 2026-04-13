@@ -3,6 +3,8 @@ from typing import List
 from app.models.user import User, UserCreate, UserUpdate, UserInDB
 from app.services.user_service import get_user_service, UserService
 from app.routers.auth import get_current_active_user
+from app.services.activity_log_service import get_activity_log_service, ActivityLogService
+from app.models.activity_log import ActivityLogCreate
 
 router = APIRouter()
 
@@ -46,7 +48,13 @@ async def get_current_user_info(current_user: UserInDB = Depends(get_current_act
     return User(**current_user.dict())
 
 @router.put("/{user_id}", response_model=User)
-async def update_user(user_id: str, user_update: UserUpdate, current_user: UserInDB = Depends(get_current_active_user), user_service: UserService = Depends(get_user_service)):
+async def update_user(
+    user_id: str,
+    user_update: UserUpdate,
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
     if current_user.id != user_id and not (current_user.is_manager or current_user.is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -58,6 +66,22 @@ async def update_user(user_id: str, user_update: UserUpdate, current_user: UserI
             status_code=404,
             detail="User not found"
         )
+    actor_name = current_user.full_name or current_user.username
+    target_name = updated_user.full_name or updated_user.username
+    await log_service.create_log(
+        ActivityLogCreate(
+            action="user_updated",
+            title="Profile updated" if str(current_user.id) == str(user_id) else "User updated",
+            description=f"{actor_name} updated {target_name} profile",
+            actor_id=str(current_user.id),
+            actor_name=actor_name,
+            target_user_id=str(updated_user.id),
+            target_user_name=target_name,
+            entity_type="user",
+            entity_id=str(updated_user.id),
+            metadata={"updated_fields": list(user_update.dict(exclude_unset=True).keys())},
+        )
+    )
     return updated_user
 
 @router.delete("/{user_id}")
