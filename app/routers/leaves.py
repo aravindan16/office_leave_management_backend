@@ -79,7 +79,10 @@ async def approve_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     
-    return await leave_service.update_leave_status(leave_id, LeaveStatus.APPROVED, manager_comment)
+    updated = await leave_service.update_leave_status(leave_id, LeaveStatus.APPROVED, manager_comment)
+    if not updated:
+        raise HTTPException(status_code=400, detail="Failed to approve leave request")
+    return updated
 
 @router.put("/{leave_id}/reject", response_model=Leave)
 async def reject_leave(
@@ -98,7 +101,10 @@ async def reject_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     
-    return await leave_service.update_leave_status(leave_id, LeaveStatus.REJECTED, manager_comment)
+    updated = await leave_service.update_leave_status(leave_id, LeaveStatus.REJECTED, manager_comment)
+    if not updated:
+        raise HTTPException(status_code=400, detail="Failed to reject leave request")
+    return updated
 
 @router.put("/{leave_id}/cancel", response_model=Leave)
 async def cancel_leave(

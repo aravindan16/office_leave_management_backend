@@ -26,7 +26,7 @@ class LeaveService:
         if leave_dict.get("manager_id") is not None and ObjectId.is_valid(str(leave_dict["manager_id"])):
             leave_dict["manager_id"] = ObjectId(str(leave_dict["manager_id"]))
         leave_dict["employee_id"] = ObjectId(employee_id)
-        leave_dict["status"] = LeaveStatus.PENDING
+        leave_dict["status"] = LeaveStatus.PENDING.value
         leave_dict["created_at"] = datetime.utcnow()
         leave_dict["updated_at"] = datetime.utcnow()
         
@@ -64,11 +64,11 @@ class LeaveService:
 
     async def get_leaves_for_manager(self, manager_id: str) -> List[Leave]:
         leaves = []
-        manager_query = {"manager_id": ObjectId(manager_id), "status": LeaveStatus.PENDING}
+        manager_query = {"manager_id": ObjectId(manager_id), "status": LeaveStatus.PENDING.value}
         if ObjectId.is_valid(manager_id):
             manager_query = {
                 "manager_id": {"$in": [ObjectId(manager_id), manager_id]},
-                "status": LeaveStatus.PENDING,
+                "status": LeaveStatus.PENDING.value,
             }
         async for leave_data in self.collection.find(manager_query):
             leave_data["id"] = str(leave_data.pop("_id"))
@@ -81,7 +81,7 @@ class LeaveService:
 
     async def get_pending_leaves(self) -> List[Leave]:
         leaves = []
-        async for leave_data in self.collection.find({"status": LeaveStatus.PENDING}):
+        async for leave_data in self.collection.find({"status": LeaveStatus.PENDING.value}):
             leave_data["id"] = str(leave_data.pop("_id"))
             leave_data["employee_id"] = str(leave_data["employee_id"])
             if leave_data.get("manager_id") is not None:
@@ -95,7 +95,7 @@ class LeaveService:
             return None
         
         update_data = {
-            "status": status,
+            "status": status.value if isinstance(status, LeaveStatus) else status,
             "updated_at": datetime.utcnow()
         }
         if manager_comment:
@@ -105,10 +105,10 @@ class LeaveService:
             {"_id": ObjectId(leave_id)},
             {"$set": update_data}
         )
-        
-        if result.modified_count:
-            return await self.get_leave_by_id(leave_id)
-        return None
+
+        if result.matched_count == 0:
+            return None
+        return await self.get_leave_by_id(leave_id)
 
     async def get_all_leaves(self) -> List[Leave]:
         leaves = []
