@@ -11,10 +11,45 @@ class LeaveService:
         self.collection = db.leaves
 
     def _normalize_leave_for_model(self, leave_data: dict) -> dict:
-        if leave_data.get("start_date") is not None and isinstance(leave_data["start_date"], datetime):
-            leave_data["start_date"] = leave_data["start_date"].date()
-        if leave_data.get("end_date") is not None and isinstance(leave_data["end_date"], datetime):
-            leave_data["end_date"] = leave_data["end_date"].date()
+        def to_date(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                # Accept both "YYYY-MM-DD" and full ISO strings.
+                try:
+                    return date.fromisoformat(value[:10])
+                except ValueError:
+                    try:
+                        return datetime.fromisoformat(value.replace('Z', '+00:00')).date()
+                    except ValueError:
+                        return value
+            return value
+
+        if "start_date" in leave_data:
+            leave_data["start_date"] = to_date(leave_data.get("start_date"))
+        if "end_date" in leave_data:
+            leave_data["end_date"] = to_date(leave_data.get("end_date"))
+
+        def to_datetime(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                except ValueError:
+                    return value
+            return value
+
+        if "created_at" in leave_data:
+            leave_data["created_at"] = to_datetime(leave_data.get("created_at"))
+        if "updated_at" in leave_data:
+            leave_data["updated_at"] = to_datetime(leave_data.get("updated_at"))
         return leave_data
 
     async def create_leave_request(self, leave_data: LeaveCreate, employee_id: str) -> Leave:
@@ -53,13 +88,18 @@ class LeaveService:
 
     async def get_leaves_by_employee(self, employee_id: str) -> List[Leave]:
         leaves = []
-        async for leave_data in self.collection.find({"employee_id": ObjectId(employee_id)}):
+        if not ObjectId.is_valid(str(employee_id)):
+            return leaves
+        async for leave_data in self.collection.find({"employee_id": ObjectId(str(employee_id))}):
             leave_data["id"] = str(leave_data.pop("_id"))
             leave_data["employee_id"] = str(leave_data["employee_id"])
             if leave_data.get("manager_id") is not None:
                 leave_data["manager_id"] = str(leave_data["manager_id"])
             leave_data = self._normalize_leave_for_model(leave_data)
-            leaves.append(Leave(**leave_data))
+            try:
+                leaves.append(Leave(**leave_data))
+            except Exception:
+                continue
         return leaves
 
     async def get_leaves_for_manager(self, manager_id: str) -> List[Leave]:
@@ -76,7 +116,10 @@ class LeaveService:
             if leave_data.get("manager_id") is not None:
                 leave_data["manager_id"] = str(leave_data["manager_id"])
             leave_data = self._normalize_leave_for_model(leave_data)
-            leaves.append(Leave(**leave_data))
+            try:
+                leaves.append(Leave(**leave_data))
+            except Exception:
+                continue
         return leaves
 
     async def get_pending_leaves(self) -> List[Leave]:
@@ -87,7 +130,10 @@ class LeaveService:
             if leave_data.get("manager_id") is not None:
                 leave_data["manager_id"] = str(leave_data["manager_id"])
             leave_data = self._normalize_leave_for_model(leave_data)
-            leaves.append(Leave(**leave_data))
+            try:
+                leaves.append(Leave(**leave_data))
+            except Exception:
+                continue
         return leaves
 
     async def update_leave_status(self, leave_id: str, status: LeaveStatus, manager_comment: Optional[str] = None) -> Optional[Leave]:
@@ -118,7 +164,10 @@ class LeaveService:
             if leave_data.get("manager_id") is not None:
                 leave_data["manager_id"] = str(leave_data["manager_id"])
             leave_data = self._normalize_leave_for_model(leave_data)
-            leaves.append(Leave(**leave_data))
+            try:
+                leaves.append(Leave(**leave_data))
+            except Exception:
+                continue
         return leaves
 
     async def cancel_leave(self, leave_id: str) -> Optional[Leave]:
