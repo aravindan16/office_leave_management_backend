@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
@@ -26,12 +26,35 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     return encoded_jwt
 
-def verify_token(token: str) -> Optional[str]:
+def create_password_reset_token(email: str, expires_delta: Optional[timedelta] = None) -> str:
+    token_expiry = expires_delta or timedelta(minutes=settings.reset_token_expire_minutes)
+    return create_access_token(
+        data={"sub": email, "type": "password_reset"},
+        expires_delta=token_expiry,
+    )
+
+def decode_token(token: str) -> Optional[Dict[str, Any]]:
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-        email: str = payload.get("sub")
-        if email is None:
-            return None
-        return email
+        return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except JWTError:
         return None
+
+def verify_token(token: str) -> Optional[str]:
+    payload = decode_token(token)
+    if payload is None:
+        return None
+    email: str = payload.get("sub")
+    if email is None:
+        return None
+    return email
+
+def verify_password_reset_token(token: str) -> Optional[str]:
+    payload = decode_token(token)
+    if payload is None:
+        return None
+    if payload.get("type") != "password_reset":
+        return None
+    email: str = payload.get("sub")
+    if email is None:
+        return None
+    return email

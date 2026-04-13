@@ -2,13 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import auth, users, leaves
 from app.routers import activity_logs
+from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
 
 app = FastAPI(title="Office Leave Management API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

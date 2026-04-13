@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pydantic import model_validator
 from typing import Optional
 from datetime import datetime, date
 from enum import Enum
@@ -16,12 +17,27 @@ class LeaveType(str, Enum):
     MATERNITY = "maternity"
     PATERNITY = "paternity"
 
+class RequestType(str, Enum):
+    LEAVE = "leave"
+    WFH = "wfh"
+
 class LeaveBase(BaseModel):
-    leave_type: LeaveType
+    request_type: RequestType = RequestType.LEAVE
+    leave_type: Optional[LeaveType] = LeaveType.VACATION
     start_date: date
     end_date: date
     reason: str
     manager_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_request_type(self):
+        if self.request_type == RequestType.WFH:
+            self.leave_type = None
+            return self
+
+        if self.leave_type is None:
+            raise ValueError("leave_type is required when request_type is leave")
+        return self
 
 class LeaveCreate(LeaveBase):
     pass

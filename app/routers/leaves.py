@@ -11,6 +11,11 @@ from bson import ObjectId
 
 router = APIRouter()
 
+def get_request_label(leave: Leave) -> str:
+    if str(leave.request_type).lower() == "wfh":
+        return "WFH"
+    return str(leave.leave_type)
+
 @router.post("/", response_model=Leave)
 async def create_leave_request(
     leave: LeaveCreate,
@@ -37,7 +42,7 @@ async def create_leave_request(
         ActivityLogCreate(
             action="leave_created",
             title="Leave request created",
-            description=f"{current_user.full_name or current_user.username} created a leave request ({created_leave.leave_type})",
+            description=f"{current_user.full_name or current_user.username} created a leave request ({get_request_label(created_leave)})",
             actor_id=str(current_user.id),
             actor_name=current_user.full_name or current_user.username,
             target_user_id=str(current_user.id),
@@ -45,6 +50,7 @@ async def create_leave_request(
             entity_type="leave",
             entity_id=str(created_leave.id),
             metadata={
+                "request_type": str(created_leave.request_type),
                 "leave_type": str(created_leave.leave_type),
                 "start_date": str(created_leave.start_date),
                 "end_date": str(created_leave.end_date),
@@ -83,7 +89,9 @@ async def get_pending_leaves(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return await leave_service.get_pending_leaves()
+    if current_user.is_admin:
+        return await leave_service.get_pending_leaves()
+    return await leave_service.get_leaves_for_manager(str(current_user.id))
 
 @router.put("/{leave_id}/approve", response_model=Leave)
 async def approve_leave(
@@ -103,6 +111,13 @@ async def approve_leave(
     leave = await leave_service.get_leave_by_id(leave_id)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
+
+    if current_user.is_manager and not current_user.is_admin:
+        if not leave.manager_id or str(leave.manager_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only approve requests assigned to you"
+            )
     
     updated_leave = await leave_service.update_leave_status(leave_id, LeaveStatus.APPROVED, manager_comment)
     if updated_leave:
@@ -123,6 +138,7 @@ async def approve_leave(
                 entity_id=str(updated_leave.id),
                 metadata={
                     "manager_comment": manager_comment,
+                    "request_type": str(updated_leave.request_type),
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
@@ -150,6 +166,13 @@ async def reject_leave(
     leave = await leave_service.get_leave_by_id(leave_id)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
+
+    if current_user.is_manager and not current_user.is_admin:
+        if not leave.manager_id or str(leave.manager_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only reject requests assigned to you"
+            )
     
     updated_leave = await leave_service.update_leave_status(leave_id, LeaveStatus.REJECTED, manager_comment)
     if updated_leave:
@@ -170,6 +193,7 @@ async def reject_leave(
                 entity_id=str(updated_leave.id),
                 metadata={
                     "manager_comment": manager_comment,
+                    "request_type": str(updated_leave.request_type),
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
@@ -215,6 +239,7 @@ async def cancel_leave(
                 entity_type="leave",
                 entity_id=str(updated_leave.id),
                 metadata={
+                    "request_type": str(updated_leave.request_type),
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),

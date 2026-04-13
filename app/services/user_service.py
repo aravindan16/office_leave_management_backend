@@ -53,6 +53,18 @@ class UserService:
             return None
         return user
 
+    async def update_password_by_email(self, email: str, new_password: str) -> bool:
+        result = await self.collection.update_one(
+            {"email": email},
+            {
+                "$set": {
+                    "hashed_password": get_password_hash(new_password),
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        return result.matched_count > 0
+
     async def update_user(self, user_id: str, user_data: UserUpdate) -> Optional[User]:
         if not ObjectId.is_valid(user_id):
             return None
