@@ -106,7 +106,7 @@ class LeaveBalanceService:
         }
         await self.entitlements.update_one(query, update, upsert=True)
 
-    async def _fetch_approved_leaves(self, user_id: str, fy_start: date, fy_end: date) -> List[Dict]:
+    async def _fetch_counted_leaves(self, user_id: str, fy_start: date, fy_end: date) -> List[Dict]:
         if not ObjectId.is_valid(str(user_id)):
             return []
 
@@ -116,7 +116,7 @@ class LeaveBalanceService:
 
         query = {
             "employee_id": ObjectId(str(user_id)),
-            "status": LeaveStatus.APPROVED.value,
+            "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
             "start_date": {"$lte": end_dt},
             "end_date": {"$gte": start_dt},
         }
@@ -136,9 +136,9 @@ class LeaveBalanceService:
         sick_taken = 0
         wfh_taken = 0
 
-        approved_leaves = await self._fetch_approved_leaves(user_id, fy_start, fy_end)
+        counted_leaves = await self._fetch_counted_leaves(user_id, fy_start, fy_end)
 
-        for leave in approved_leaves:
+        for leave in counted_leaves:
             raw_start = leave.get("start_date")
             raw_end = leave.get("end_date")
             if isinstance(raw_start, datetime):
