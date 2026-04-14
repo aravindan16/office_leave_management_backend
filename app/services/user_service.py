@@ -30,7 +30,8 @@ class UserService:
         return User(**user_dict)
 
     async def get_user_by_email(self, email: str) -> Optional[UserInDB]:
-        user_data = await self.collection.find_one({"email": email})
+        user_data = await self.collection.find_one({"email": email, "is_active": True})
+
         if user_data:
             user_data["id"] = str(user_data.pop("_id"))
             return UserInDB(**user_data)
@@ -39,7 +40,8 @@ class UserService:
     async def get_user_by_id(self, user_id: str) -> Optional[User]:
         if not ObjectId.is_valid(user_id):
             return None
-        user_data = await self.collection.find_one({"_id": ObjectId(user_id)})
+        user_data = await self.collection.find_one({"_id": ObjectId(user_id), "is_active": True})
+
         if user_data:
             user_data["id"] = str(user_data.pop("_id"))
             return User(**user_data)
@@ -120,8 +122,13 @@ class UserService:
     async def delete_user(self, user_id: str) -> bool:
         if not ObjectId.is_valid(user_id):
             return False
-        result = await self.collection.delete_one({"_id": ObjectId(user_id)})
-        return result.deleted_count > 0
+        # Soft delete: set is_active to False
+        result = await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+        )
+        return result.matched_count > 0
+
 
 def get_user_service() -> UserService:
     return UserService(get_database())
