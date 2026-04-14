@@ -53,6 +53,23 @@ class UserService:
             return None
         return user
 
+    async def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
+        if not ObjectId.is_valid(user_id):
+            return False
+        user_in_db = await self.collection.find_one({"_id": ObjectId(user_id)})
+        if not user_in_db:
+            return False
+        hashed_password = user_in_db.get("hashed_password")
+        if not hashed_password or not verify_password(current_password, hashed_password):
+            return False
+
+        new_hash = get_password_hash(new_password)
+        result = await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"hashed_password": new_hash, "updated_at": datetime.utcnow()}},
+        )
+        return result.matched_count > 0
+
     async def update_password_by_email(self, email: str, new_password: str) -> bool:
         result = await self.collection.update_one(
             {"email": email},
@@ -95,7 +112,7 @@ class UserService:
 
     async def get_managers(self) -> List[User]:
         managers = []
-        async for user_data in self.collection.find({"is_admin": True, "is_active": True}):
+        async for user_data in self.collection.find({"is_active": True, "$or": [{"is_manager": True}, {"is_admin": True}]}):
             user_data["id"] = str(user_data.pop("_id"))
             managers.append(User(**user_data))
         return managers

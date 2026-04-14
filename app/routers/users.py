@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
-from app.models.user import User, UserCreate, UserUpdate, UserInDB
+from app.models.user import User, UserCreate, UserUpdate, UserInDB, ChangePasswordRequest
 from app.services.user_service import get_user_service, UserService
 from app.routers.auth import get_current_active_user
 from app.services.activity_log_service import get_activity_log_service, ActivityLogService
@@ -46,6 +46,18 @@ async def get_managers(user_service: UserService = Depends(get_user_service)):
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: UserInDB = Depends(get_current_active_user)):
     return User(**current_user.dict())
+
+
+@router.post("/me/change-password")
+async def change_my_password(
+    payload: ChangePasswordRequest,
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    ok = await user_service.change_password(str(current_user.id), payload.current_password, payload.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    return {"success": True}
 
 @router.put("/{user_id}", response_model=User)
 async def update_user(
