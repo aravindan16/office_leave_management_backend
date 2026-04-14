@@ -137,11 +137,23 @@ class LeaveBalanceService:
         wfh_taken = 0
 
         counted_leaves = await self._fetch_counted_leaves(user_id, fy_start, fy_end)
+        reset_at = entitlement.get("updated_at")
 
         for leave in counted_leaves:
             raw_start = leave.get("start_date")
             raw_end = leave.get("end_date")
+
+            if reset_at and isinstance(reset_at, datetime):
+                # If the leave was created before the most recent reset, 
+                # we ignore it to ensure the balance stays at the full allowance.
+                created_at = leave.get("created_at")
+                if isinstance(created_at, datetime) and created_at < reset_at:
+                    continue
+
+
+
             if isinstance(raw_start, datetime):
+
                 leave_start = raw_start.date()
             elif isinstance(raw_start, date):
                 leave_start = raw_start
