@@ -13,6 +13,7 @@ async def create_user(
     user: UserCreate,
     current_user: UserInDB = Depends(get_current_active_user),
     user_service: UserService = Depends(get_user_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
     if not current_user.is_admin:
         raise HTTPException(
@@ -26,7 +27,27 @@ async def create_user(
             detail="Email already registered"
         )
     try:
-        return await user_service.create_user(user)
+        created_user = await user_service.create_user(user)
+        actor_name = current_user.full_name or current_user.username
+        target_name = created_user.full_name or created_user.username
+        await log_service.create_log(
+            ActivityLogCreate(
+                action="user_created",
+                title="User created",
+                description=f"{actor_name} created {target_name}",
+                actor_id=str(current_user.id),
+                actor_name=actor_name,
+                target_user_id=str(created_user.id),
+                target_user_name=target_name,
+                entity_type="user",
+                entity_id=str(created_user.id),
+                metadata={
+                    "email": getattr(created_user, "email", None),
+                    "employee_id": getattr(created_user, "employee_id", None),
+                },
+            )
+        )
+        return created_user
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -104,7 +125,12 @@ async def update_user(
     return updated_user
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: str, current_user: UserInDB = Depends(get_current_active_user), user_service: UserService = Depends(get_user_service)):
+async def delete_user(
+    user_id: str,
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -112,9 +138,29 @@ async def delete_user(user_id: str, current_user: UserInDB = Depends(get_current
         )
     if str(current_user.id) == str(user_id):
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    target_user = await user_service.get_user_by_id(user_id)
+    target_name = None
+    if target_user:
+        target_name = target_user.full_name or target_user.username
     deleted = await user_service.delete_user(user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="User not found")
+
+    actor_name = current_user.full_name or current_user.username
+    await log_service.create_log(
+        ActivityLogCreate(
+            action="user_deleted",
+            title="User deleted",
+            description=f"{actor_name} deleted {target_name or user_id}",
+            actor_id=str(current_user.id),
+            actor_name=actor_name,
+            target_user_id=str(user_id),
+            target_user_name=target_name,
+            entity_type="user",
+            entity_id=str(user_id),
+        )
+    )
     return {"success": True}
 
 @router.get("/next-employee-id")
