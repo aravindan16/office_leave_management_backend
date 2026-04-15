@@ -136,7 +136,13 @@ class LeaveService:
                 continue
         return leaves
 
-    async def update_leave_status(self, leave_id: str, status: LeaveStatus, manager_comment: Optional[str] = None) -> Optional[Leave]:
+    async def update_leave_status(
+        self,
+        leave_id: str,
+        status: LeaveStatus,
+        manager_comment: Optional[str] = None,
+        leave_type: Optional[str] = None,
+    ) -> Optional[Leave]:
         if not ObjectId.is_valid(leave_id):
             return None
         
@@ -146,6 +152,8 @@ class LeaveService:
         }
         if manager_comment:
             update_data["manager_comment"] = manager_comment
+        if leave_type is not None:
+            update_data["leave_type"] = leave_type
         
         result = await self.collection.update_one(
             {"_id": ObjectId(leave_id)},

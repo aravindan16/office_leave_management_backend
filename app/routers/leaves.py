@@ -1,3 +1,5 @@
+from datetime import datetime, time
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.models.leave import Leave, LeaveCreate, LeaveUpdate, LeaveStatus
@@ -7,6 +9,7 @@ from app.services.user_service import get_user_service, UserService
 from app.routers.auth import get_current_active_user
 from app.services.activity_log_service import get_activity_log_service, ActivityLogService
 from app.models.activity_log import ActivityLogCreate
+from app.services.leave_balance_service import LeaveBalanceService, get_leave_balance_service
 from bson import ObjectId
 
 router = APIRouter()
@@ -22,6 +25,7 @@ async def create_leave_request(
     current_user: UserInDB = Depends(get_current_active_user),
     leave_service: LeaveService = Depends(get_leave_service),
     user_service: UserService = Depends(get_user_service),
+    balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
     log_service: ActivityLogService = Depends(get_activity_log_service)
 ):
     if leave.manager_id and not ObjectId.is_valid(str(leave.manager_id)):
@@ -36,7 +40,37 @@ async def create_leave_request(
         if not managers:
             raise HTTPException(status_code=400, detail="No managers available")
         leave.manager_id = managers[0].id
+
+    # Prevent duplicate/overlapping requests for the same dates.
+    start_dt = datetime.combine(leave.start_date, time.min)
+    end_dt = datetime.combine(leave.end_date, time.max)
+    overlap_query = {
+        "employee_id": ObjectId(str(current_user.id)),
+        "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
+        "start_date": {"$lte": end_dt},
+        "end_date": {"$gte": start_dt},
+    }
+    existing_overlap = await leave_service.collection.find_one(overlap_query)
+    if existing_overlap:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have a pending/approved request for the selected date(s).",
+        )
     
+    # Guardrail: don't allow creating a Sick leave request that exceeds balance.
+    if str(leave.request_type).lower() == "leave" and str(leave.leave_type).lower() == "sick":
+        try:
+            balance = await balance_service.get_balance_for_user(str(current_user.id))
+        except Exception:
+            balance = None
+        if balance is not None:
+            days = (leave.end_date - leave.start_date).days + 1
+            if days > (balance.sick.balance or 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Insufficient Sick leave balance.",
+                )
+
     created_leave = await leave_service.create_leave_request(leave, str(current_user.id))
     await log_service.create_log(
         ActivityLogCreate(
@@ -92,6 +126,7 @@ async def get_pending_leaves(
 async def approve_leave(
     leave_id: str,
     manager_comment: str = None,
+    as_unpaid: bool = False,
     current_user: UserInDB = Depends(get_current_active_user),
     leave_service: LeaveService = Depends(get_leave_service),
     user_service: UserService = Depends(get_user_service),
@@ -107,7 +142,16 @@ async def approve_leave(
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
 
-    updated_leave = await leave_service.update_leave_status(leave_id, LeaveStatus.APPROVED, manager_comment)
+    leave_type_override = None
+    if as_unpaid and str(leave.request_type).lower() == "leave":
+        leave_type_override = "unpaid"
+
+    updated_leave = await leave_service.update_leave_status(
+        leave_id,
+        LeaveStatus.APPROVED,
+        manager_comment,
+        leave_type=leave_type_override,
+    )
     if updated_leave:
         employee = await user_service.get_user_by_id(str(updated_leave.employee_id))
         employee_name = None

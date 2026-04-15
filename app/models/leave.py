@@ -12,6 +12,7 @@ class LeaveStatus(str, Enum):
 
 class LeaveType(str, Enum):
     SICK = "sick"
+    UNPAID = "unpaid"
     VACATION = "vacation"
     PERSONAL = "personal"
     MATERNITY = "maternity"
