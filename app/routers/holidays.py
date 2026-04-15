@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+from datetime import datetime
 from typing import List
 
 from app.models.holiday import Holiday, HolidayCreate, HolidayUpdate
@@ -18,6 +21,116 @@ async def list_holidays(
     holiday_service: HolidayService = Depends(get_holiday_service),
 ):
     return await holiday_service.get_all_holidays()
+
+
+@router.get("/download-pdf")
+async def download_holidays_pdf(
+    current_user: UserInDB = Depends(get_current_active_user),
+    holiday_service: HolidayService = Depends(get_holiday_service),
+):
+    holidays = await holiday_service.get_all_holidays()
+
+    def _pdf_escape_text(value: str) -> str:
+        return (
+            str(value or "")
+            .replace("\\", "\\\\")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+        )
+
+    def _build_minimal_pdf(lines: List[str]) -> bytes:
+        header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+
+        # A4 in points: 595 x 842
+        font_obj = b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>"
+
+        # Build text stream
+        # Start near top-left margin
+        x = 48
+        y = 800
+        leading = 14
+        parts: List[bytes] = []
+        parts.append(b"BT\n")
+        parts.append(f"/F1 12 Tf\n{x} {y} Td\n".encode("ascii"))
+        for i, raw in enumerate(lines):
+            t = _pdf_escape_text(raw)
+            parts.append(f"({t}) Tj\n".encode("utf-8"))
+            if i != len(lines) - 1:
+                parts.append(f"0 -{leading} Td\n".encode("ascii"))
+        parts.append(b"ET\n")
+        text_stream = b"".join(parts)
+        contents_obj = b"<< /Length " + str(len(text_stream)).encode("ascii") + b" >>\nstream\n" + text_stream + b"endstream"
+
+        # Objects
+        # 1: Catalog, 2: Pages, 3: Page, 4: Font, 5: Contents
+        objs: List[bytes] = []
+        objs.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+        objs.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>")
+        objs.append(font_obj)
+        objs.append(contents_obj)
+
+        # Write file with xref
+        out = bytearray()
+        out += header
+        offsets = [0]  # xref entry 0
+        for i, body in enumerate(objs, start=1):
+            offsets.append(len(out))
+            out += f"{i} 0 obj\n".encode("ascii")
+            out += body
+            out += b"\nendobj\n"
+
+        xref_start = len(out)
+        out += b"xref\n"
+        out += f"0 {len(offsets)}\n".encode("ascii")
+        out += b"0000000000 65535 f \n"
+        for off in offsets[1:]:
+            out += f"{off:010d} 00000 n \n".encode("ascii")
+
+        out += b"trailer\n"
+        out += f"<< /Size {len(offsets)} /Root 1 0 R >>\n".encode("ascii")
+        out += b"startxref\n"
+        out += f"{xref_start}\n".encode("ascii")
+        out += b"%%EOF\n"
+        return bytes(out)
+
+    def fmt_date(value: str) -> str:
+        if not value:
+            return ""
+        try:
+            d = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return d.date().strftime("%d/%m/%Y")
+        except Exception:
+            try:
+                d2 = datetime.strptime(str(value)[:10], "%Y-%m-%d")
+                return d2.date().strftime("%d/%m/%Y")
+            except Exception:
+                return str(value)
+
+    now = datetime.utcnow()
+    fy_start_year = now.year if now.month >= 4 else now.year - 1
+    fy_label = f"Financial Year: 01/04/{fy_start_year} to 31/03/{fy_start_year + 1}"
+    lines: List[str] = []
+    lines.append("Holiday List")
+    lines.append(fy_label)
+    lines.append("")
+    lines.append("#   Date        Name")
+    lines.append("----------------------------------------------")
+    if not holidays:
+        lines.append("No holidays found")
+    else:
+        for idx, h in enumerate(holidays, start=1):
+            date_label = fmt_date(getattr(h, "date", ""))
+            name = str(getattr(h, "name", "") or "")
+            lines.append(f"{idx:>2}  {date_label:<10}  {name}")
+
+    pdf_bytes = _build_minimal_pdf(lines)
+    buf = BytesIO(pdf_bytes)
+    filename = f"holidays_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    return StreamingResponse(buf, media_type="application/pdf", headers=headers)
 
 
 @router.post("/", response_model=Holiday)
