@@ -70,6 +70,22 @@ class LeaveBalanceService:
         await self.entitlements.insert_one(doc)
         return doc
 
+    async def _get_entitlement_for_fy(self, user_id: str, fy_start_year: int) -> Dict:
+        if not ObjectId.is_valid(str(user_id)):
+            raise ValueError("Invalid user_id")
+
+        query = {"user_id": ObjectId(str(user_id)), "fy_start_year": int(fy_start_year)}
+        existing = await self.entitlements.find_one(query)
+        if existing:
+            return existing
+
+        return {
+            **query,
+            "sick_total": DEFAULT_SICK_TOTAL,
+            "wfh_total": DEFAULT_WFH_TOTAL,
+            "updated_at": None,
+        }
+
     async def reset_entitlement_to_default(
         self, 
         user_id: str, 
@@ -136,12 +152,22 @@ class LeaveBalanceService:
             leaves.append(doc)
         return leaves
 
-    async def get_balance_for_user(self, user_id: str, today: Optional[date] = None) -> LeaveBalanceSummary:
+    async def get_balance_for_user(
+        self,
+        user_id: str,
+        today: Optional[date] = None,
+        fy_start_year: Optional[int] = None,
+    ) -> LeaveBalanceSummary:
         current_fy_start_year, _, _ = get_financial_year_range(today)
-        entitlement = await self._get_or_create_entitlement(user_id, current_fy_start_year)
 
-        fy_start_year = int(entitlement.get("fy_start_year", current_fy_start_year))
-        _, fy_start, fy_end = get_financial_year_range(date(fy_start_year, 4, 1))
+        if fy_start_year is None:
+            entitlement = await self._get_or_create_entitlement(user_id, current_fy_start_year)
+            resolved_fy_start_year = int(entitlement.get("fy_start_year", current_fy_start_year))
+        else:
+            entitlement = await self._get_entitlement_for_fy(user_id, int(fy_start_year))
+            resolved_fy_start_year = int(fy_start_year)
+
+        _, fy_start, fy_end = get_financial_year_range(date(resolved_fy_start_year, 4, 1))
 
         sick_taken = 0
         wfh_taken = 0
@@ -201,17 +227,22 @@ class LeaveBalanceService:
             reset_at_str = reset_at.isoformat()
 
         return LeaveBalanceSummary(
-            fy_start_year=fy_start_year,
-            fy_end_year=fy_start_year + 1,
+            fy_start_year=resolved_fy_start_year,
+            fy_end_year=resolved_fy_start_year + 1,
             sick=sick_item,
             wfh=wfh_item,
             reset_at=reset_at_str,
         )
 
-    async def get_balances_for_users(self, user_ids: List[str], today: Optional[date] = None) -> List[LeaveBalanceSummaryWithUser]:
+    async def get_balances_for_users(
+        self,
+        user_ids: List[str],
+        today: Optional[date] = None,
+        fy_start_year: Optional[int] = None,
+    ) -> List[LeaveBalanceSummaryWithUser]:
         summaries: List[LeaveBalanceSummaryWithUser] = []
         for user_id in user_ids:
-            summary = await self.get_balance_for_user(user_id, today=today)
+            summary = await self.get_balance_for_user(user_id, today=today, fy_start_year=fy_start_year)
             summaries.append(LeaveBalanceSummaryWithUser(user_id=str(user_id), **summary.model_dump()))
         return summaries
 

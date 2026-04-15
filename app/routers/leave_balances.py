@@ -19,8 +19,9 @@ router = APIRouter()
 async def get_my_leave_balance(
     current_user: UserInDB = Depends(get_current_active_user),
     balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
+    fy_start_year: Optional[int] = None,
 ):
-    return await balance_service.get_balance_for_user(str(current_user.id))
+    return await balance_service.get_balance_for_user(str(current_user.id), fy_start_year=fy_start_year)
 
 
 @router.get("/users", response_model=List[LeaveBalanceSummaryWithUser])
@@ -28,13 +29,14 @@ async def get_users_leave_balances(
     current_user: UserInDB = Depends(get_current_active_user),
     balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
     user_service: UserService = Depends(get_user_service),
+    fy_start_year: Optional[int] = None,
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     users = await user_service.get_all_users(exclude_admins=True)
     user_ids = [str(u.id) for u in users]
-    return await balance_service.get_balances_for_users(user_ids)
+    return await balance_service.get_balances_for_users(user_ids, fy_start_year=fy_start_year)
 
 
 @router.post("/users/{user_id}/reset", status_code=204)
