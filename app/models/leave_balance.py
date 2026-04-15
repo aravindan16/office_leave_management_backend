@@ -18,3 +18,10 @@ class LeaveBalanceSummary(BaseModel):
 
 class LeaveBalanceSummaryWithUser(LeaveBalanceSummary):
     user_id: str
+
+
+class LeaveResetRequest(BaseModel):
+    sick_total: Optional[int] = None
+    wfh_total: Optional[int] = None
+    fy_start_year: Optional[int] = None
+

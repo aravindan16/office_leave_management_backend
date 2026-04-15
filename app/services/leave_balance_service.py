@@ -70,7 +70,13 @@ class LeaveBalanceService:
         await self.entitlements.insert_one(doc)
         return doc
 
-    async def reset_entitlement_to_default(self, user_id: str, fy_start_year: Optional[int] = None) -> None:
+    async def reset_entitlement_to_default(
+        self, 
+        user_id: str, 
+        sick_total: Optional[int] = None,
+        wfh_total: Optional[int] = None,
+        fy_start_year: Optional[int] = None
+    ) -> None:
         fy = fy_start_year
         if fy is None:
             fy, _, _ = get_financial_year_range()
@@ -78,15 +84,19 @@ class LeaveBalanceService:
         if not ObjectId.is_valid(str(user_id)):
             raise ValueError("Invalid user_id")
 
+        s_total = sick_total if sick_total is not None else DEFAULT_SICK_TOTAL
+        w_total = wfh_total if wfh_total is not None else DEFAULT_WFH_TOTAL
+
         query = {"user_id": ObjectId(str(user_id)), "fy_start_year": fy}
         update = {
             "$set": {
-                "sick_total": DEFAULT_SICK_TOTAL,
-                "wfh_total": DEFAULT_WFH_TOTAL,
+                "sick_total": s_total,
+                "wfh_total": w_total,
                 "updated_at": datetime.utcnow(),
             }
         }
         await self.entitlements.update_one(query, update, upsert=True)
+
 
     async def set_entitlement_totals(self, user_id: str, sick_total: int, wfh_total: int, fy_start_year: Optional[int] = None) -> None:
         fy = fy_start_year

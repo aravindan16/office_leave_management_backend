@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.models.leave_balance import LeaveBalanceSummary, LeaveBalanceSummaryWithUser
+from app.models.leave_balance import LeaveBalanceSummary, LeaveBalanceSummaryWithUser, LeaveResetRequest
 from app.models.user import UserInDB
 from app.routers.auth import get_current_active_user
 from app.services.leave_balance_service import LeaveBalanceService, get_leave_balance_service
@@ -29,7 +29,7 @@ async def get_users_leave_balances(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
-    users = await user_service.get_all_users()
+    users = await user_service.get_all_users(exclude_admins=True)
     user_ids = [str(u.id) for u in users]
     return await balance_service.get_balances_for_users(user_ids)
 
@@ -37,7 +37,7 @@ async def get_users_leave_balances(
 @router.post("/users/{user_id}/reset", status_code=204)
 async def reset_user_leave_entitlement(
     user_id: str,
-    fy_start_year: Optional[int] = None,
+    reset_data: Optional[LeaveResetRequest] = None,
     current_user: UserInDB = Depends(get_current_active_user),
     balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
 ):
@@ -45,8 +45,18 @@ async def reset_user_leave_entitlement(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     try:
-        await balance_service.reset_entitlement_to_default(user_id, fy_start_year=fy_start_year)
+        sick_total = reset_data.sick_total if reset_data else None
+        wfh_total = reset_data.wfh_total if reset_data else None
+        fy_year = reset_data.fy_start_year if reset_data else None
+        
+        await balance_service.reset_entitlement_to_default(
+            user_id, 
+            sick_total=sick_total, 
+            wfh_total=wfh_total, 
+            fy_start_year=fy_year
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return None
+

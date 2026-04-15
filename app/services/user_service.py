@@ -1,4 +1,5 @@
 from typing import Optional, List
+import re
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.user import User, UserInDB, UserCreate, UserUpdate
 from app.core.security import get_password_hash, verify_password
@@ -105,9 +106,13 @@ class UserService:
             return None
         return await self.get_user_by_id(user_id)
 
-    async def get_all_users(self) -> List[User]:
+    async def get_all_users(self, exclude_admins: bool = False) -> List[User]:
         users = []
-        async for user_data in self.collection.find({"is_active": True}):
+        query = {"is_active": True}
+        if exclude_admins:
+            query["is_admin"] = {"$ne": True}
+
+        async for user_data in self.collection.find(query):
             user_data["id"] = str(user_data.pop("_id"))
             users.append(User(**user_data))
         return users
@@ -129,6 +134,28 @@ class UserService:
         )
         return result.matched_count > 0
 
+    async def get_next_employee_id(self) -> str:
+        # WG followed by 4 digits
+        cursor = self.collection.find(
+            {"employee_id": {"$regex": "^WG\\d+$"}},
+            {"employee_id": 1}
+        ).sort("employee_id", -1).limit(1)
+        
+        last_user = await cursor.to_list(length=1)
+        if not last_user:
+            return "WG0001"
+            
+        last_id = last_user[0]["employee_id"]
+        match = re.search(r"(\d+)", last_id)
+        if match:
+            num_str = match.group(1)
+            num = int(num_str)
+            next_num = num + 1
+            # Maintain the same padding if possible, or default to 4
+            padding = len(num_str)
+            return f"WG{next_num:0{padding}d}"
+        
+        return "WG0001"
 
 def get_user_service() -> UserService:
     return UserService(get_database())

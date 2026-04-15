@@ -37,7 +37,7 @@ async def get_users(current_user: UserInDB = Depends(get_current_active_user), u
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return await user_service.get_all_users()
+    return await user_service.get_all_users(exclude_admins=True)
 
 @router.get("/managers", response_model=List[User])
 async def get_managers(user_service: UserService = Depends(get_user_service)):
@@ -72,6 +72,13 @@ async def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
+    
+    if not current_user.is_admin:
+        if user_update.is_admin is not None or user_update.is_manager is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions to change roles"
+            )
     updated_user = await user_service.update_user(user_id, user_update)
     if not updated_user:
         raise HTTPException(
@@ -109,3 +116,16 @@ async def delete_user(user_id: str, current_user: UserInDB = Depends(get_current
     if not deleted:
         raise HTTPException(status_code=404, detail="User not found")
     return {"success": True}
+
+@router.get("/next-employee-id")
+async def get_next_employee_id(
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+    next_id = await user_service.get_next_employee_id()
+    return {"next_id": next_id}
