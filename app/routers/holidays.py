@@ -3,6 +3,12 @@ from fastapi.responses import StreamingResponse
 from io import BytesIO
 from datetime import datetime
 from typing import List
+import os
+
+try:
+    from fpdf import FPDF
+except Exception:  # pragma: no cover
+    FPDF = None
 
 from app.models.holiday import Holiday, HolidayCreate, HolidayUpdate
 from app.models.user import UserInDB
@@ -45,7 +51,6 @@ async def download_holidays_pdf(
         font_obj = b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>"
 
         # Build text stream
-        # Start near top-left margin
         x = 48
         y = 800
         leading = 14
@@ -59,21 +64,29 @@ async def download_holidays_pdf(
                 parts.append(f"0 -{leading} Td\n".encode("ascii"))
         parts.append(b"ET\n")
         text_stream = b"".join(parts)
-        contents_obj = b"<< /Length " + str(len(text_stream)).encode("ascii") + b" >>\nstream\n" + text_stream + b"endstream"
+        contents_obj = (
+            b"<< /Length "
+            + str(len(text_stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + text_stream
+            + b"endstream"
+        )
 
         # Objects
-        # 1: Catalog, 2: Pages, 3: Page, 4: Font, 5: Contents
         objs: List[bytes] = []
         objs.append(b"<< /Type /Catalog /Pages 2 0 R >>")
         objs.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>")
+        objs.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        )
         objs.append(font_obj)
         objs.append(contents_obj)
 
         # Write file with xref
         out = bytearray()
         out += header
-        offsets = [0]  # xref entry 0
+        offsets = [0]
         for i, body in enumerate(objs, start=1):
             offsets.append(len(out))
             out += f"{i} 0 obj\n".encode("ascii")
@@ -94,37 +107,152 @@ async def download_holidays_pdf(
         out += b"%%EOF\n"
         return bytes(out)
 
-    def fmt_date(value: str) -> str:
+    def parse_date(value: str):
         if not value:
-            return ""
+            return None
         try:
-            d = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return d.date().strftime("%d/%m/%Y")
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
         except Exception:
             try:
-                d2 = datetime.strptime(str(value)[:10], "%Y-%m-%d")
-                return d2.date().strftime("%d/%m/%Y")
+                return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
             except Exception:
-                return str(value)
+                return None
 
-    now = datetime.utcnow()
-    fy_start_year = now.year if now.month >= 4 else now.year - 1
-    fy_label = f"Financial Year: 01/04/{fy_start_year} to 31/03/{fy_start_year + 1}"
-    lines: List[str] = []
-    lines.append("Holiday List")
-    lines.append(fy_label)
-    lines.append("")
-    lines.append("#   Date        Name")
-    lines.append("----------------------------------------------")
+    def fmt_pretty(value: str) -> str:
+        d = parse_date(value)
+        if not d:
+            return str(value or "")
+        return d.strftime("%a, %-d %b %Y")
+
+    year = None
+    for h in holidays or []:
+        d = parse_date(getattr(h, "date", ""))
+        if d:
+            year = d.year
+            break
+    if not year:
+        year = datetime.utcnow().year
+
+    if FPDF is None:
+        lines: List[str] = []
+        lines.append("Holiday List")
+        lines.append(f"{year} Holiday Leave Calendar")
+        lines.append("Official Public Holidays")
+        lines.append("")
+        lines.append("#   Date        Name")
+        lines.append("----------------------------------------------")
+        if not holidays:
+            lines.append("No holidays found")
+        else:
+            for idx, h in enumerate(holidays, start=1):
+                date_label = fmt_pretty(getattr(h, "date", ""))
+                name = str(getattr(h, "name", "") or "")
+                lines.append(f"{idx:>2}  {date_label:<18}  {name}")
+
+        pdf_bytes = _build_minimal_pdf(lines)
+        buf = BytesIO(pdf_bytes)
+        filename = f"holidays_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        return StreamingResponse(buf, media_type="application/pdf", headers=headers)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    green = (0, 200, 100)
+    navy = (18, 52, 94)
+    light_row = (245, 247, 250)
+    border = (220, 226, 235)
+
+    # Header logo (W mark) + brand text
+    logo_path = None
+    try:
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        root_dir = os.path.abspath(os.path.join(backend_dir, ".."))
+        candidate = os.path.join(root_dir, "office_leave_management_frontend", "src", "wizzgeek.png")
+        if os.path.exists(candidate):
+            logo_path = candidate
+    except Exception:
+        logo_path = None
+
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(*green)
+
+    # If we have the logo file, use it as the "W" and print "IZZGEEKS" next to it.
+    # Otherwise fall back to plain text.
+    if logo_path:
+        try:
+            page_w = 210
+            y = 18
+            logo_w = 14
+            gap = 2
+            brand_text = "IZZGEEKS"
+            text_w = pdf.get_string_width(brand_text)
+            lockup_w = logo_w + gap + text_w
+            x = (page_w - lockup_w) / 2
+
+            pdf.image(logo_path, x=x, y=y, w=logo_w)
+            pdf.set_xy(x + logo_w + gap, y + 1)
+            pdf.cell(text_w, 12, brand_text, ln=1)
+        except Exception:
+            pdf.cell(0, 12, "WIZZGEEKS", ln=1, align="C")
+    else:
+        pdf.cell(0, 12, "WIZZGEEKS", ln=1, align="C")
+
+    pdf.ln(2)
+    pdf.set_text_color(31, 41, 55)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, f"{year} Holiday Leave Calendar", ln=1, align="C")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(107, 114, 128)
+    pdf.cell(0, 5, "Official Public Holidays", ln=1, align="C")
+
+    pdf.ln(6)
+
+    left_margin = 18
+    right_margin = 18
+    table_w = 210 - left_margin - right_margin
+    col_num = 10
+    col_date = 48
+    col_name = table_w - col_num - col_date
+    row_h = 8
+
+    pdf.set_draw_color(*border)
+    pdf.set_fill_color(*navy)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+
+    pdf.set_x(left_margin)
+    pdf.cell(col_num, row_h, "#", border=1, align="C", fill=True)
+    pdf.cell(col_date, row_h, "Date", border=1, align="C", fill=True)
+    pdf.cell(col_name, row_h, "Holiday Name", border=1, align="C", fill=True, ln=1)
+
+    pdf.set_text_color(17, 24, 39)
+    pdf.set_font("Helvetica", "", 9)
     if not holidays:
-        lines.append("No holidays found")
+        pdf.set_x(left_margin)
+        pdf.cell(table_w, row_h, "No holidays found", border=1, align="C")
     else:
         for idx, h in enumerate(holidays, start=1):
-            date_label = fmt_date(getattr(h, "date", ""))
-            name = str(getattr(h, "name", "") or "")
-            lines.append(f"{idx:>2}  {date_label:<10}  {name}")
+            fill = idx % 2 == 0
+            if fill:
+                pdf.set_fill_color(*light_row)
+            else:
+                pdf.set_fill_color(255, 255, 255)
 
-    pdf_bytes = _build_minimal_pdf(lines)
+            pdf.set_x(left_margin)
+            pdf.cell(col_num, row_h, str(idx), border=1, align="C", fill=fill)
+            pdf.cell(col_date, row_h, fmt_pretty(getattr(h, "date", "")), border=1, align="C", fill=fill)
+            pdf.cell(col_name, row_h, str(getattr(h, "name", "") or ""), border=1, align="L", fill=fill, ln=1)
+
+    pdf.ln(8)
+    pdf.set_text_color(107, 114, 128)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.multi_cell(0, 4, "* This calendar is for reference purposes only. Actual leave entitlements are subject to company policy.")
+
+    pdf_bytes = bytes(pdf.output(dest="S"))
     buf = BytesIO(pdf_bytes)
     filename = f"holidays_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
     headers = {
