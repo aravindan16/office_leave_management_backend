@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
@@ -17,7 +17,23 @@ router = APIRouter()
 def get_request_label(leave: Leave) -> str:
     if str(leave.request_type).lower() == "wfh":
         return "WFH"
+    if str(leave.leave_type).lower() == "unpaid":
+        return "Loss of Pay"
     return str(leave.leave_type)
+
+
+def iter_month_ranges(start_date: date, end_date: date):
+    cursor = date(start_date.year, start_date.month, 1)
+    last_month = date(end_date.year, end_date.month, 1)
+
+    while cursor <= last_month:
+        if cursor.month == 12:
+            next_month = date(cursor.year + 1, 1, 1)
+        else:
+            next_month = date(cursor.year, cursor.month + 1, 1)
+
+        yield cursor, (next_month - timedelta(days=1))
+        cursor = next_month
 
 @router.post("/", response_model=Leave)
 async def create_leave_request(
@@ -56,6 +72,21 @@ async def create_leave_request(
             status_code=400,
             detail="You already have a pending/approved request for the selected date(s).",
         )
+
+    if str(leave.request_type).lower() == "wfh":
+        for month_start, month_end in iter_month_ranges(leave.start_date, leave.end_date):
+            existing_month_wfh = await leave_service.collection.find_one({
+                "employee_id": ObjectId(str(current_user.id)),
+                "request_type": "wfh",
+                "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
+                "start_date": {"$lte": datetime.combine(month_end, time.max)},
+                "end_date": {"$gte": datetime.combine(month_start, time.min)},
+            })
+            if existing_month_wfh:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Only one WFH request is allowed per month. You already have a WFH request for {month_start.strftime('%B %Y')}.",
+                )
     
     # Guardrail: don't allow creating a Sick leave request that exceeds balance.
     if str(leave.request_type).lower() == "leave" and str(leave.leave_type).lower() == "sick":

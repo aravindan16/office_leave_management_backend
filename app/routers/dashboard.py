@@ -40,6 +40,19 @@ def _to_employee(u) -> DashboardEmployee:
     )
 
 
+def _add_months(d: date, months: int) -> date:
+    month_index = (d.month - 1) + months
+    year = d.year + (month_index // 12)
+    month = (month_index % 12) + 1
+    day = d.day
+
+    while True:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            day -= 1
+
+
 @router.get("/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
     current_user: UserInDB = Depends(get_current_active_user),
@@ -51,10 +64,10 @@ async def get_dashboard_summary(
     employees = [u for u in (active_users or []) if not getattr(u, "is_admin", False) and not getattr(u, "is_manager", False)]
 
     today = date.today()
-    current_month = today.month
+    next_three_month_cutoff = _add_months(today, 3)
 
     birthdays: List[DashboardBirthdayItem] = []
-    for u in active_users:
+    for u in employees:
         dob = getattr(u, "date_of_birth", None)
         if not dob:
             continue
@@ -63,15 +76,18 @@ async def get_dashboard_summary(
         if not isinstance(dob, date):
             continue
 
-        if dob.month != current_month:
-            continue
-
         try:
             next_bd = date(today.year, dob.month, dob.day)
         except Exception:
             continue
 
         if next_bd < today:
+            try:
+                next_bd = date(today.year + 1, dob.month, dob.day)
+            except Exception:
+                continue
+
+        if next_bd >= next_three_month_cutoff:
             continue
 
         birthdays.append(
