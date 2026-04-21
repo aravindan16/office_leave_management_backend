@@ -69,6 +69,24 @@ async def get_current_user_info(current_user: UserInDB = Depends(get_current_act
     return User(**current_user.dict())
 
 
+@router.get("/{user_id}", response_model=User)
+async def get_user_by_id(
+    user_id: str,
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    if not current_user.is_admin and str(current_user.id) != str(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
 @router.post("/me/change-password")
 async def change_my_password(
     payload: ChangePasswordRequest,

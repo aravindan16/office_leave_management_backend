@@ -70,6 +70,35 @@ class LeaveBalanceService:
         await self.entitlements.insert_one(doc)
         return doc
 
+    async def _ensure_entitlement_for_financial_year(self, user_id: str, fy_start_year: int) -> Dict:
+        """
+        Ensure an entitlement document exists for the requested FY.
+        New FY entries always reset sick leave to default (12), while preserving
+        the latest configured WFH total.
+        """
+        if not ObjectId.is_valid(str(user_id)):
+            raise ValueError("Invalid user_id")
+
+        query = {"user_id": ObjectId(str(user_id)), "fy_start_year": int(fy_start_year)}
+        existing = await self.entitlements.find_one(query)
+        if existing:
+            return existing
+
+        latest = await self.entitlements.find_one(
+            {"user_id": ObjectId(str(user_id))},
+            sort=[("fy_start_year", -1)],
+        )
+        wfh_total = int(latest.get("wfh_total", DEFAULT_WFH_TOTAL)) if latest else DEFAULT_WFH_TOTAL
+
+        doc = {
+            **query,
+            "sick_total": DEFAULT_SICK_TOTAL,
+            "wfh_total": wfh_total,
+            "updated_at": datetime.utcnow(),
+        }
+        await self.entitlements.insert_one(doc)
+        return doc
+
     async def _get_entitlement_for_fy(self, user_id: str, fy_start_year: int) -> Dict:
         if not ObjectId.is_valid(str(user_id)):
             raise ValueError("Invalid user_id")
@@ -161,7 +190,7 @@ class LeaveBalanceService:
         current_fy_start_year, _, _ = get_financial_year_range(today)
 
         if fy_start_year is None:
-            entitlement = await self._get_or_create_entitlement(user_id, current_fy_start_year)
+            entitlement = await self._ensure_entitlement_for_financial_year(user_id, current_fy_start_year)
             resolved_fy_start_year = int(entitlement.get("fy_start_year", current_fy_start_year))
         else:
             entitlement = await self._get_entitlement_for_fy(user_id, int(fy_start_year))
@@ -233,6 +262,24 @@ class LeaveBalanceService:
             wfh=wfh_item,
             reset_at=reset_at_str,
         )
+
+    async def reset_sick_leave_for_all_users(self, user_ids: List[str], fy_start_year: int) -> None:
+        for user_id in user_ids:
+            if not ObjectId.is_valid(str(user_id)):
+                continue
+
+            latest = await self.entitlements.find_one(
+                {"user_id": ObjectId(str(user_id))},
+                sort=[("fy_start_year", -1)],
+            )
+            wfh_total = int(latest.get("wfh_total", DEFAULT_WFH_TOTAL)) if latest else DEFAULT_WFH_TOTAL
+
+            await self.reset_entitlement_to_default(
+                user_id=user_id,
+                sick_total=DEFAULT_SICK_TOTAL,
+                wfh_total=wfh_total,
+                fy_start_year=int(fy_start_year),
+            )
 
     async def get_balances_for_users(
         self,

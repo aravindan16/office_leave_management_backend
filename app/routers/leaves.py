@@ -119,6 +119,7 @@ async def create_leave_request(
                 "leave_type": str(created_leave.leave_type),
                 "start_date": str(created_leave.start_date),
                 "end_date": str(created_leave.end_date),
+                "reason": str(created_leave.reason),
                 "status": str(created_leave.status),
             },
         )
@@ -205,6 +206,7 @@ async def approve_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },
             )
@@ -253,6 +255,7 @@ async def reject_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },
             )
@@ -299,6 +302,7 @@ async def cancel_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },
             )

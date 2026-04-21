@@ -2,7 +2,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.models.leave_balance import LeaveBalanceSummary, LeaveBalanceSummaryWithUser, LeaveResetRequest
+from app.models.leave_balance import (
+    LeaveBalanceSummary,
+    LeaveBalanceSummaryWithUser,
+    LeaveResetRequest,
+    BulkLeaveResetRequest,
+)
 from app.models.user import UserInDB
 from app.routers.auth import get_current_active_user
 from app.services.leave_balance_service import LeaveBalanceService, get_leave_balance_service
@@ -13,6 +18,11 @@ from bson import ObjectId
 
 
 router = APIRouter()
+
+def get_current_fy_start_year() -> int:
+    from datetime import datetime
+    now = datetime.utcnow()
+    return now.year if now.month >= 4 else now.year - 1
 
 
 @router.get("/me", response_model=LeaveBalanceSummary)
@@ -99,6 +109,46 @@ async def reset_user_leave_entitlement(
                 "fy_start_year_before": fy_before,
                 "sick_total_before": sick_total_before,
                 "wfh_total_before": wfh_total_before,
+            },
+        )
+    )
+
+    return None
+
+
+@router.post("/users/reset-all-leave", status_code=204)
+async def reset_leave_for_all_users(
+    reset_data: Optional[BulkLeaveResetRequest] = None,
+    current_user: UserInDB = Depends(get_current_active_user),
+    balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
+    user_service: UserService = Depends(get_user_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    next_fy_start_year = get_current_fy_start_year() + 1
+    target_fy = int(reset_data.fy_start_year) if reset_data and reset_data.fy_start_year else next_fy_start_year
+
+    users = await user_service.get_all_users(exclude_admins=True)
+    user_ids = [str(u.id) for u in users]
+    await balance_service.reset_sick_leave_for_all_users(user_ids, fy_start_year=target_fy)
+
+    actor_name = current_user.full_name or current_user.username
+    await log_service.create_log(
+        ActivityLogCreate(
+            action="leave_balance_bulk_reset",
+            title="Leave balance reset for all users",
+            description=f"{actor_name} reset sick leave for all users for FY {target_fy}-{str(target_fy + 1)[-2:]}",
+            actor_id=str(current_user.id),
+            actor_name=actor_name,
+            entity_type="leave_balance",
+            entity_id="all_users",
+            metadata={
+                "scope": "all_users",
+                "fy_start_year": target_fy,
+                "sick_total": 12,
+                "wfh_changed": False,
             },
         )
     )

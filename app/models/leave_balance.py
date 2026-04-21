@@ -25,3 +25,7 @@ class LeaveResetRequest(BaseModel):
     wfh_total: Optional[int] = None
     fy_start_year: Optional[int] = None
 
+
+class BulkLeaveResetRequest(BaseModel):
+    fy_start_year: Optional[int] = None
+
