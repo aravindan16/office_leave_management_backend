@@ -9,8 +9,10 @@ class ActivityLogBase(BaseModel):
     description: str
     actor_id: Optional[str] = None
     actor_name: Optional[str] = None
+    actor_profile_image: Optional[str] = None
     target_user_id: Optional[str] = None
     target_user_name: Optional[str] = None
+    target_profile_image: Optional[str] = None
     entity_type: Optional[str] = None
     entity_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
