@@ -69,6 +69,19 @@ async def get_current_user_info(current_user: UserInDB = Depends(get_current_act
     return User(**current_user.dict())
 
 
+@router.get("/next-employee-id")
+async def get_next_employee_id(
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+    next_id = await user_service.get_next_employee_id()
+    return {"next_id": next_id}
+
 @router.get("/{user_id}", response_model=User)
 async def get_user_by_id(
     user_id: str,
@@ -181,15 +194,3 @@ async def delete_user(
     )
     return {"success": True}
 
-@router.get("/next-employee-id")
-async def get_next_employee_id(
-    current_user: UserInDB = Depends(get_current_active_user),
-    user_service: UserService = Depends(get_user_service),
-):
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions",
-        )
-    next_id = await user_service.get_next_employee_id()
-    return {"next_id": next_id}
