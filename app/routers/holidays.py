@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 from datetime import datetime
@@ -7,8 +7,10 @@ import os
 
 try:
     from fpdf import FPDF
-except Exception:  # pragma: no cover
+    _fpdf_import_error = None
+except Exception as e:  # pragma: no cover
     FPDF = None
+    _fpdf_import_error = e
 
 from app.models.holiday import Holiday, HolidayCreate, HolidayUpdate
 from app.models.user import UserInDB
@@ -33,8 +35,18 @@ async def list_holidays(
 async def download_holidays_pdf(
     current_user: UserInDB = Depends(get_current_active_user),
     holiday_service: HolidayService = Depends(get_holiday_service),
+    year: int | None = Query(default=None),
 ):
     holidays = await holiday_service.get_all_holidays()
+
+    if year is not None:
+        holidays = [
+            h
+            for h in (holidays or [])
+            if getattr(h, "date", None)
+            and str(getattr(h, "date"))[:4].isdigit()
+            and int(str(getattr(h, "date"))[:4]) == int(year)
+        ]
 
     def _pdf_escape_text(value: str) -> str:
         return (
@@ -124,38 +136,29 @@ async def download_holidays_pdf(
             return str(value or "")
         return d.strftime("%a, %-d %b %Y")
 
-    year = None
-    for h in holidays or []:
-        d = parse_date(getattr(h, "date", ""))
-        if d:
-            year = d.year
-            break
-    if not year:
-        year = datetime.utcnow().year
+    (holidays or []).sort(
+        key=lambda h: (
+            parse_date(getattr(h, "date", ""))
+            or datetime.max.date()
+        )
+    )
+
+    resolved_year = year
+    if resolved_year is None:
+        for h in holidays or []:
+            d = parse_date(getattr(h, "date", ""))
+            if d:
+                resolved_year = d.year
+                break
+    if not resolved_year:
+        resolved_year = datetime.utcnow().year
 
     if FPDF is None:
-        lines: List[str] = []
-        lines.append("Holiday List")
-        lines.append(f"{year} Holiday Leave Calendar")
-        lines.append("Official Public Holidays")
-        lines.append("")
-        lines.append("#   Date        Name")
-        lines.append("----------------------------------------------")
-        if not holidays:
-            lines.append("No holidays found")
-        else:
-            for idx, h in enumerate(holidays, start=1):
-                date_label = fmt_pretty(getattr(h, "date", ""))
-                name = str(getattr(h, "name", "") or "")
-                lines.append(f"{idx:>2}  {date_label:<18}  {name}")
-
-        pdf_bytes = _build_minimal_pdf(lines)
-        buf = BytesIO(pdf_bytes)
-        filename = f"holidays_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
-        headers = {
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        }
-        return StreamingResponse(buf, media_type="application/pdf", headers=headers)
+        err = _fpdf_import_error
+        detail = "PDF styling dependency is not available (fpdf2). Please install backend requirements."
+        if err is not None:
+            detail = f"{detail} Import error: {err}"
+        raise HTTPException(status_code=500, detail=detail)
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
@@ -204,7 +207,7 @@ async def download_holidays_pdf(
     pdf.ln(2)
     pdf.set_text_color(31, 41, 55)
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, f"{year} Holiday Leave Calendar", ln=1, align="C")
+    pdf.cell(0, 8, f"{resolved_year} Holiday Leave Calendar", ln=1, align="C")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(107, 114, 128)
     pdf.cell(0, 5, "Official Public Holidays", ln=1, align="C")

@@ -6,6 +6,8 @@ from app.routers import activity_logs
 from app.core.config import settings
 from app.routers import holidays
 from app.routers import dashboard
+from app.routers import physical_years
+from app.routers import physical_calendar
 from app.core.database import connect_to_mongo, close_mongo_connection
 
 app = FastAPI(title="Office Leave Management API", version="1.0.0")
@@ -29,6 +31,8 @@ app.include_router(leave_balances.router, prefix="/api/leave-balances", tags=["l
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["activity-logs"])
 app.include_router(holidays.router, prefix="/api/holidays", tags=["holidays"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(physical_years.router, prefix="/api/physical-years", tags=["physical-years"])
+app.include_router(physical_calendar.router, prefix="/api/physical-calendar", tags=["physical-calendar"])
 
 @app.get("/")
 async def root():
