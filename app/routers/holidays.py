@@ -248,7 +248,7 @@ async def download_holidays_pdf(
             pdf.set_x(left_margin)
             pdf.cell(col_num, row_h, str(idx), border=1, align="C", fill=fill)
             pdf.cell(col_date, row_h, fmt_pretty(getattr(h, "date", "")), border=1, align="C", fill=fill)
-            pdf.cell(col_name, row_h, str(getattr(h, "name", "") or ""), border=1, align="L", fill=fill, ln=1)
+            pdf.cell(col_name, row_h, str(getattr(h, "name", "") or ""), border=1, align="C", fill=fill, ln=1)
 
     pdf.ln(8)
     pdf.set_text_color(107, 114, 128)
