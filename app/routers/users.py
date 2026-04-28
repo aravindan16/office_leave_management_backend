@@ -131,7 +131,10 @@ async def update_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions to change roles"
             )
-    updated_user = await user_service.update_user(user_id, user_update)
+    try:
+        updated_user = await user_service.update_user(user_id, user_update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not updated_user:
         raise HTTPException(
             status_code=404,
@@ -193,4 +196,3 @@ async def delete_user(
         )
     )
     return {"success": True}
-

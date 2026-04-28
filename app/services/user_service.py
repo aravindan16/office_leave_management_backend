@@ -91,6 +91,15 @@ class UserService:
         
         update_data = user_data.dict(exclude_unset=True)
 
+        username = update_data.get("username")
+        if username:
+            existing_username = await self.collection.find_one({
+                "username": username,
+                "_id": {"$ne": ObjectId(user_id)},
+            })
+            if existing_username:
+                raise ValueError("Username already registered")
+
         dob = update_data.get("date_of_birth")
         if isinstance(dob, date) and not isinstance(dob, datetime):
             update_data["date_of_birth"] = datetime.combine(dob, time.min)
