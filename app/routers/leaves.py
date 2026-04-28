@@ -35,6 +35,16 @@ def iter_month_ranges(start_date: date, end_date: date):
         yield cursor, (next_month - timedelta(days=1))
         cursor = next_month
 
+
+def get_requested_days(leave) -> float:
+    duration = getattr(leave, "duration_days", None)
+    if duration is not None:
+        try:
+            return float(duration)
+        except (TypeError, ValueError):
+            pass
+    return float((leave.end_date - leave.start_date).days + 1)
+
 @router.post("/", response_model=Leave)
 async def create_leave_request(
     leave: LeaveCreate,
@@ -95,7 +105,7 @@ async def create_leave_request(
         except Exception:
             balance = None
         if balance is not None:
-            days = (leave.end_date - leave.start_date).days + 1
+            days = get_requested_days(leave)
             if days > (balance.sick.balance or 0):
                 raise HTTPException(
                     status_code=400,
@@ -119,6 +129,7 @@ async def create_leave_request(
                 "leave_type": str(created_leave.leave_type),
                 "start_date": str(created_leave.start_date),
                 "end_date": str(created_leave.end_date),
+                "duration_days": getattr(created_leave, "duration_days", None),
                 "reason": str(created_leave.reason),
                 "status": str(created_leave.status),
             },
@@ -206,6 +217,7 @@ async def approve_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "duration_days": getattr(updated_leave, "duration_days", None),
                     "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },
@@ -255,6 +267,7 @@ async def reject_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "duration_days": getattr(updated_leave, "duration_days", None),
                     "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },
@@ -302,6 +315,7 @@ async def cancel_leave(
                     "leave_type": str(updated_leave.leave_type),
                     "start_date": str(updated_leave.start_date),
                     "end_date": str(updated_leave.end_date),
+                    "duration_days": getattr(updated_leave, "duration_days", None),
                     "reason": str(updated_leave.reason),
                     "status": str(updated_leave.status),
                 },

@@ -4,8 +4,8 @@ from typing import Optional
 
 class LeaveBalanceItem(BaseModel):
     total: int
-    taken: int
-    balance: int
+    taken: float
+    balance: float
 
 
 class LeaveBalanceSummary(BaseModel):
@@ -28,4 +28,3 @@ class LeaveResetRequest(BaseModel):
 
 class BulkLeaveResetRequest(BaseModel):
     fy_start_year: Optional[int] = None
-

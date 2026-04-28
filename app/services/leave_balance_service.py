@@ -37,6 +37,26 @@ def count_overlap_days(start: date, end: date, range_start: date, range_end: dat
     return (effective_end - effective_start).days + 1
 
 
+def get_counted_days(leave: Dict, leave_start: date, leave_end: date, fy_start: date, fy_end: date) -> float:
+    overlap_days = count_overlap_days(leave_start, leave_end, fy_start, fy_end)
+    if overlap_days <= 0:
+        return 0
+
+    duration = leave.get("duration_days")
+    try:
+        duration_value = float(duration)
+    except (TypeError, ValueError):
+        duration_value = 0
+
+    if duration_value > 0:
+        full_range_days = max((leave_end - leave_start).days + 1, 1)
+        if full_range_days == 1:
+            return duration_value
+        return min(float(overlap_days), duration_value)
+
+    return float(overlap_days)
+
+
 class LeaveBalanceService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
@@ -198,8 +218,8 @@ class LeaveBalanceService:
 
         _, fy_start, fy_end = get_financial_year_range(date(resolved_fy_start_year, 4, 1))
 
-        sick_taken = 0
-        wfh_taken = 0
+        sick_taken = 0.0
+        wfh_taken = 0.0
 
         counted_leaves = await self._fetch_counted_leaves(user_id, fy_start, fy_end)
         reset_at = entitlement.get("updated_at")
@@ -232,7 +252,7 @@ class LeaveBalanceService:
             else:
                 continue
 
-            days = count_overlap_days(leave_start, leave_end, fy_start, fy_end)
+            days = get_counted_days(leave, leave_start, leave_end, fy_start, fy_end)
             if days <= 0:
                 continue
 

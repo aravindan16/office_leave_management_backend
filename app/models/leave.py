@@ -27,6 +27,7 @@ class LeaveBase(BaseModel):
     leave_type: Optional[LeaveType] = LeaveType.VACATION
     start_date: date
     end_date: date
+    duration_days: Optional[float] = None
     reason: str
     manager_id: Optional[str] = None
 
@@ -38,6 +39,11 @@ class LeaveBase(BaseModel):
 
         if self.leave_type is None:
             raise ValueError("leave_type is required when request_type is leave")
+        if self.duration_days is not None:
+            if self.duration_days <= 0:
+                raise ValueError("duration_days must be greater than 0")
+            if self.duration_days == 0.5 and self.start_date != self.end_date:
+                raise ValueError("Half-day leave must start and end on the same date")
         return self
 
 class LeaveCreate(LeaveBase):
@@ -47,6 +53,7 @@ class LeaveUpdate(BaseModel):
     leave_type: Optional[LeaveType] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    duration_days: Optional[float] = None
     reason: Optional[str] = None
     status: Optional[LeaveStatus] = None
     manager_comment: Optional[str] = None
