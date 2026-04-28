@@ -200,7 +200,13 @@ class LeaveBalanceService:
         }
         await self.entitlements.update_one(query, update, upsert=True)
 
-    async def _fetch_counted_leaves(self, user_id: str, fy_start: date, fy_end: date) -> List[Dict]:
+    async def _fetch_counted_leaves(
+        self,
+        user_id: str,
+        fy_start: date,
+        fy_end: date,
+        include_pending: bool = True,
+    ) -> List[Dict]:
         if not ObjectId.is_valid(str(user_id)):
             return []
 
@@ -208,9 +214,13 @@ class LeaveBalanceService:
         start_dt = datetime.combine(fy_start, datetime.min.time())
         end_dt = datetime.combine(fy_end, datetime.max.time())
 
+        statuses = [LeaveStatus.APPROVED.value]
+        if include_pending:
+            statuses.append(LeaveStatus.PENDING.value)
+
         query = {
             "employee_id": ObjectId(str(user_id)),
-            "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
+            "status": {"$in": statuses},
             "start_date": {"$lte": end_dt},
             "end_date": {"$gte": start_dt},
         }
@@ -225,6 +235,7 @@ class LeaveBalanceService:
         user_id: str,
         today: Optional[date] = None,
         fy_start_year: Optional[int] = None,
+        include_pending: bool = True,
     ) -> LeaveBalanceSummary:
         current_fy_start_year, _, _ = get_financial_year_range(today)
 
@@ -240,7 +251,12 @@ class LeaveBalanceService:
         sick_taken = 0.0
         wfh_taken = 0.0
 
-        counted_leaves = await self._fetch_counted_leaves(user_id, fy_start, fy_end)
+        counted_leaves = await self._fetch_counted_leaves(
+            user_id,
+            fy_start,
+            fy_end,
+            include_pending=include_pending,
+        )
         reset_at = entitlement.get("updated_at")
 
         for leave in counted_leaves:
@@ -327,10 +343,16 @@ class LeaveBalanceService:
         user_ids: List[str],
         today: Optional[date] = None,
         fy_start_year: Optional[int] = None,
+        include_pending: bool = True,
     ) -> List[LeaveBalanceSummaryWithUser]:
         summaries: List[LeaveBalanceSummaryWithUser] = []
         for user_id in user_ids:
-            summary = await self.get_balance_for_user(user_id, today=today, fy_start_year=fy_start_year)
+            summary = await self.get_balance_for_user(
+                user_id,
+                today=today,
+                fy_start_year=fy_start_year,
+                include_pending=include_pending,
+            )
             summaries.append(LeaveBalanceSummaryWithUser(user_id=str(user_id), **summary.model_dump()))
         return summaries
 
