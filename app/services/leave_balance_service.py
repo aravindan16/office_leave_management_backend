@@ -12,7 +12,7 @@ from app.models.leave_balance import LeaveBalanceItem, LeaveBalanceSummary, Leav
 
 
 DEFAULT_SICK_TOTAL = 12
-DEFAULT_WFH_TOTAL = 5
+DEFAULT_WFH_TOTAL = 12
 
 
 def get_financial_year_range(today: Optional[date] = None) -> Tuple[int, date, date]:
@@ -37,8 +37,26 @@ def count_overlap_days(start: date, end: date, range_start: date, range_end: dat
     return (effective_end - effective_start).days + 1
 
 
+def count_overlap_working_days(start: date, end: date, range_start: date, range_end: date) -> int:
+    effective_start = max(start, range_start)
+    effective_end = min(end, range_end)
+    if effective_end < effective_start:
+        return 0
+
+    from datetime import timedelta
+
+    count = 0
+    d = effective_start
+    while d <= effective_end:
+        if d.weekday() < 5:
+            count += 1
+        d = d + timedelta(days=1)
+    return count
+
+
 def get_counted_days(leave: Dict, leave_start: date, leave_end: date, fy_start: date, fy_end: date) -> float:
     overlap_days = count_overlap_days(leave_start, leave_end, fy_start, fy_end)
+    overlap_working_days = count_overlap_working_days(leave_start, leave_end, fy_start, fy_end)
     if overlap_days <= 0:
         return 0
 
@@ -52,9 +70,9 @@ def get_counted_days(leave: Dict, leave_start: date, leave_end: date, fy_start: 
         full_range_days = max((leave_end - leave_start).days + 1, 1)
         if full_range_days == 1:
             return duration_value
-        return min(float(overlap_days), duration_value)
+        return min(float(overlap_working_days), duration_value)
 
-    return float(overlap_days)
+    return float(overlap_working_days)
 
 
 class LeaveBalanceService:
@@ -109,6 +127,7 @@ class LeaveBalanceService:
             sort=[("fy_start_year", -1)],
         )
         wfh_total = int(latest.get("wfh_total", DEFAULT_WFH_TOTAL)) if latest else DEFAULT_WFH_TOTAL
+        wfh_total = max(wfh_total, DEFAULT_WFH_TOTAL)
 
         doc = {
             **query,
@@ -266,6 +285,7 @@ class LeaveBalanceService:
 
         sick_total = int(entitlement.get("sick_total", DEFAULT_SICK_TOTAL))
         wfh_total = int(entitlement.get("wfh_total", DEFAULT_WFH_TOTAL))
+        wfh_total = max(wfh_total, DEFAULT_WFH_TOTAL)
 
         sick_item = LeaveBalanceItem(total=sick_total, taken=sick_taken, balance=max(sick_total - sick_taken, 0))
         wfh_item = LeaveBalanceItem(total=wfh_total, taken=wfh_taken, balance=max(wfh_total - wfh_taken, 0))
@@ -293,6 +313,7 @@ class LeaveBalanceService:
                 sort=[("fy_start_year", -1)],
             )
             wfh_total = int(latest.get("wfh_total", DEFAULT_WFH_TOTAL)) if latest else DEFAULT_WFH_TOTAL
+            wfh_total = max(wfh_total, DEFAULT_WFH_TOTAL)
 
             await self.reset_entitlement_to_default(
                 user_id=user_id,
