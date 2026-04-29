@@ -48,12 +48,18 @@ class EmailService:
             subtype="html",
         )
 
-        with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-            if self.smtp_use_tls:
-                server.starttls()
-            if self.smtp_username and self.smtp_password:
-                server.login(self.smtp_username, self.smtp_password)
-            server.send_message(message)
+        # Use a timeout for the SMTP connection to prevent hanging
+        try:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
+                if self.smtp_use_tls:
+                    server.starttls()
+                if self.smtp_username and self.smtp_password:
+                    server.login(self.smtp_username, self.smtp_password)
+                server.send_message(message)
+        except Exception as e:
+            # Since this runs in the background, we should log the error
+            print(f"Failed to send email: {str(e)}")
+            # We don't re-raise here because it's a background task
 
 
 email_service = EmailService()

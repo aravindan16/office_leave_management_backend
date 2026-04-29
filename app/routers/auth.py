@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta
 from pydantic import BaseModel, EmailStr, Field
@@ -73,6 +73,7 @@ async def read_users_me(current_user: UserInDB = Depends(get_current_active_user
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
     payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     user_service: UserService = Depends(get_user_service),
 ):
     user = await user_service.get_user_by_email(payload.email)
@@ -86,13 +87,11 @@ async def forgot_password(
 
         reset_token = create_password_reset_token(user.email)
         reset_link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={reset_token}"
-        try:
-            email_service.send_password_reset_email(user.email, reset_link)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to send password reset email",
-            )
+        
+        # Send email in background to avoid blocking the request and causing timeouts
+        background_tasks.add_task(
+            email_service.send_password_reset_email, user.email, reset_link
+        )
 
     return {"message": "If that email exists, a reset link has been sent."}
 
