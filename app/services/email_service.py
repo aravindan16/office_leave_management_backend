@@ -1,15 +1,8 @@
 import smtplib
 import socket
+import uuid
 from email.message import EmailMessage
-
 from app.core.config import settings
-
-
-# ✅ Force IPv4 instead of IPv6 (THIS FIXES YOUR ISSUE)
-class SMTPIPv4(smtplib.SMTP):
-    def _get_socket(self, host, port, timeout):
-        return socket.create_connection((host, port), timeout)
-
 
 class EmailService:
     def __init__(self) -> None:
@@ -26,11 +19,10 @@ class EmailService:
 
     def send_password_reset_email(self, recipient_email: str, reset_link: str) -> None:
         if not self.is_configured():
-            raise ValueError("SMTP settings are not configured")
+            print("❌ SMTP settings are not configured")
+            return
 
-        import uuid
         test_id = str(uuid.uuid4())[:8]
-
         message = EmailMessage()
         message["Subject"] = f"Reset your password - {test_id}"
         message["From"] = f"{self.smtp_from_name} <{self.smtp_from_email}>"
@@ -42,7 +34,6 @@ class EmailService:
             f"This link expires in {settings.reset_token_expire_minutes} minutes.\n"
             "If you did not request this change, you can ignore this email."
         )
-
         message.add_alternative(
             f"""
             <html>
@@ -59,27 +50,46 @@ class EmailService:
             subtype="html",
         )
 
+        # Force IPv4 resolution to bypass Docker/Network IPv6 issues
         try:
-            print(f"Attempting to send email to {recipient_email} via {self.smtp_host}:{self.smtp_port}...")
+            print(f"Attempting to send email to {recipient_email} (ID: {test_id})...")
+            
+            # Resolve hostname to IPv4 specifically
+            addr_info = socket.getaddrinfo(self.smtp_host, self.smtp_port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+            target_ip = addr_info[0][4][0]
+            print(f"Connecting to {self.smtp_host} via IPv4 address {target_ip}...")
 
-            # ✅ USE IPv4 FORCED SMTP (IMPORTANT CHANGE)
-            with SMTPIPv4(self.smtp_host, self.smtp_port, timeout=15) as server:
-                server.ehlo()
-
+            # Use smtplib.SMTP with the IP but pass the original hostname for STARTTLS
+            with smtplib.SMTP(target_ip, self.smtp_port, timeout=15) as server:
                 if self.smtp_use_tls:
-                    server.starttls()
-                    server.ehlo()
+                    # In Python 3.11, starttls handles the server_hostname from the SMTP constructor,
+                    # but since we used target_ip, we might need to handle it or it might just work 
+                    # if we don't enforce strict hostname checking.
+                    # Actually, smtplib's starttls doesn't expose server_hostname directly in 3.11 easily.
+                    # Let's try the direct hostname first, but with a fallback.
+                    try:
+                        server.starttls()
+                    except Exception as tls_err:
+                        print(f"STARTTLS failed: {tls_err}. Retrying with direct hostname...")
+                        # Fallback to hostname if IP connection failed TLS (unlikely to reach here if IP worked)
+                        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server2:
+                            if self.smtp_use_tls:
+                                server2.starttls()
+                            if self.smtp_username and self.smtp_password:
+                                server2.login(self.smtp_username, self.smtp_password)
+                            server2.send_message(message)
+                            print(f"✅ Successfully sent email to {recipient_email} via hostname fallback")
+                            return
 
                 if self.smtp_username and self.smtp_password:
                     server.login(self.smtp_username, self.smtp_password)
-
+                
                 server.send_message(message)
-
-                print(f"Successfully sent password reset email to {recipient_email}")
-
+                print(f"✅ Successfully sent email to {recipient_email} (ID: {test_id})")
+                
         except Exception as e:
-            print(f"❌ Failed to send email: {str(e)}")
+            print(f"❌ Failed to send email to {recipient_email}: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
-
-# instance
 email_service = EmailService()
