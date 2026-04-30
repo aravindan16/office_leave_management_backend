@@ -11,6 +11,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    && echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

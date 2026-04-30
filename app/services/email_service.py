@@ -50,15 +50,31 @@ class EmailService:
 
         # Use a timeout for the SMTP connection to prevent hanging
         try:
+            print(f"Attempting to send email to {recipient_email} via {self.smtp_host}:{self.smtp_port}...")
+            
+            # Use smtplib.SMTP as a context manager
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
                 if self.smtp_use_tls:
                     server.starttls()
+                
                 if self.smtp_username and self.smtp_password:
                     server.login(self.smtp_username, self.smtp_password)
+                
                 server.send_message(message)
+                print(f"Successfully sent password reset email to {recipient_email}")
+                
+        except OSError as e:
+            # Handle [Errno 101] Network is unreachable specifically
+            error_msg = str(e)
+            if "[Errno 101]" in error_msg or "Network is unreachable" in error_msg:
+                print(f"CRITICAL: Network unreachable when sending email to {recipient_email}. "
+                      f"This is often an IPv6 issue in Docker. "
+                      f"Ensure the container is configured to prefer IPv4.")
+            else:
+                print(f"Failed to send email to {recipient_email} (Network/Socket Error): {error_msg}")
         except Exception as e:
-            # Since this runs in the background, we should log the error
-            print(f"Failed to send email: {str(e)}")
+            # Catch all other exceptions (authentication, SMTP errors, etc.)
+            print(f"Failed to send email to {recipient_email} (SMTP/Other Error): {str(e)}")
             # We don't re-raise here because it's a background task
 
 
