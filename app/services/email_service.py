@@ -1,7 +1,14 @@
 import smtplib
+import socket
 from email.message import EmailMessage
 
 from app.core.config import settings
+
+
+# ✅ Force IPv4 instead of IPv6 (THIS FIXES YOUR ISSUE)
+class SMTPIPv4(smtplib.SMTP):
+    def _get_socket(self, host, port, timeout):
+        return socket.create_connection((host, port), timeout)
 
 
 class EmailService:
@@ -23,6 +30,7 @@ class EmailService:
 
         import uuid
         test_id = str(uuid.uuid4())[:8]
+
         message = EmailMessage()
         message["Subject"] = f"Reset your password - {test_id}"
         message["From"] = f"{self.smtp_from_name} <{self.smtp_from_email}>"
@@ -34,6 +42,7 @@ class EmailService:
             f"This link expires in {settings.reset_token_expire_minutes} minutes.\n"
             "If you did not request this change, you can ignore this email."
         )
+
         message.add_alternative(
             f"""
             <html>
@@ -50,35 +59,27 @@ class EmailService:
             subtype="html",
         )
 
-        # Use a timeout for the SMTP connection to prevent hanging
         try:
             print(f"Attempting to send email to {recipient_email} via {self.smtp_host}:{self.smtp_port}...")
-            
-            # Use smtplib.SMTP as a context manager
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
+
+            # ✅ USE IPv4 FORCED SMTP (IMPORTANT CHANGE)
+            with SMTPIPv4(self.smtp_host, self.smtp_port, timeout=15) as server:
+                server.ehlo()
+
                 if self.smtp_use_tls:
                     server.starttls()
-                
+                    server.ehlo()
+
                 if self.smtp_username and self.smtp_password:
                     server.login(self.smtp_username, self.smtp_password)
-                
+
                 server.send_message(message)
-                print(f"SMTP Headers sent: {dict(message)}")
+
                 print(f"Successfully sent password reset email to {recipient_email}")
-                
-        except OSError as e:
-            # Handle [Errno 101] Network is unreachable specifically
-            error_msg = str(e)
-            if "[Errno 101]" in error_msg or "Network is unreachable" in error_msg:
-                print(f"CRITICAL: Network unreachable when sending email to {recipient_email}. "
-                      f"This is often an IPv6 issue in Docker. "
-                      f"Ensure the container is configured to prefer IPv4.")
-            else:
-                print(f"Failed to send email to {recipient_email} (Network/Socket Error): {error_msg}")
+
         except Exception as e:
-            # Catch all other exceptions (authentication, SMTP errors, etc.)
-            print(f"Failed to send email to {recipient_email} (SMTP/Other Error): {str(e)}")
-            # We don't re-raise here because it's a background task
+            print(f"❌ Failed to send email: {str(e)}")
 
 
+# instance
 email_service = EmailService()
