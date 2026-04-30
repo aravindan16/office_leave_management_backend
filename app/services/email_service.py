@@ -21,8 +21,10 @@ class EmailService:
         if not self.is_configured():
             raise ValueError("SMTP settings are not configured")
 
+        import uuid
+        test_id = str(uuid.uuid4())[:8]
         message = EmailMessage()
-        message["Subject"] = "Reset your password"
+        message["Subject"] = f"Reset your password - {test_id}"
         message["From"] = f"{self.smtp_from_name} <{self.smtp_from_email}>"
         message["To"] = recipient_email
 
@@ -61,6 +63,7 @@ class EmailService:
                     server.login(self.smtp_username, self.smtp_password)
                 
                 server.send_message(message)
+                print(f"SMTP Headers sent: {dict(message)}")
                 print(f"Successfully sent password reset email to {recipient_email}")
                 
         except OSError as e:
