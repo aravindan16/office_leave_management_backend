@@ -57,28 +57,27 @@ class EmailService:
             # Resolve hostname to IPv4 specifically
             addr_info = socket.getaddrinfo(self.smtp_host, self.smtp_port, family=socket.AF_INET, type=socket.SOCK_STREAM)
             target_ip = addr_info[0][4][0]
-            print(f"Connecting to {self.smtp_host} via IPv4 address {target_ip}...")
+            print(f"Connecting to {self.smtp_host} via IPv4 address {target_ip} on port {self.smtp_port}...")
 
-            # Use smtplib.SMTP with the IP but pass the original hostname for STARTTLS
-            with smtplib.SMTP(target_ip, self.smtp_port, timeout=15) as server:
-                if self.smtp_use_tls:
-                    # In Python 3.11, starttls handles the server_hostname from the SMTP constructor,
-                    # but since we used target_ip, we might need to handle it or it might just work 
-                    # if we don't enforce strict hostname checking.
-                    # Actually, smtplib's starttls doesn't expose server_hostname directly in 3.11 easily.
-                    # Let's try the direct hostname first, but with a fallback.
+            # Use SMTP_SSL for port 465, otherwise standard SMTP
+            if self.smtp_port == 465:
+                smtp_class = smtplib.SMTP_SSL
+            else:
+                smtp_class = smtplib.SMTP
+
+            with smtp_class(target_ip, self.smtp_port, timeout=15) as server:
+                # If using standard SMTP on 587, we need STARTTLS
+                if self.smtp_port != 465 and self.smtp_use_tls:
                     try:
                         server.starttls()
                     except Exception as tls_err:
                         print(f"STARTTLS failed: {tls_err}. Retrying with direct hostname...")
-                        # Fallback to hostname if IP connection failed TLS (unlikely to reach here if IP worked)
                         with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server2:
-                            if self.smtp_use_tls:
-                                server2.starttls()
+                            server2.starttls()
                             if self.smtp_username and self.smtp_password:
                                 server2.login(self.smtp_username, self.smtp_password)
                             server2.send_message(message)
-                            print(f"✅ Successfully sent email to {recipient_email} via hostname fallback")
+                            print(f"✅ Successfully sent email via hostname fallback")
                             return
 
                 if self.smtp_username and self.smtp_password:
