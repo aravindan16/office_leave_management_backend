@@ -35,15 +35,14 @@ class LeaveBase(BaseModel):
     def validate_request_type(self):
         if self.request_type == RequestType.WFH:
             self.leave_type = None
-            return self
 
-        if self.leave_type is None:
+        if self.request_type == RequestType.LEAVE and self.leave_type is None:
             raise ValueError("leave_type is required when request_type is leave")
         if self.duration_days is not None:
             if self.duration_days <= 0:
                 raise ValueError("duration_days must be greater than 0")
             if self.duration_days == 0.5 and self.start_date != self.end_date:
-                raise ValueError("Half-day leave must start and end on the same date")
+                raise ValueError("Half-day request must start and end on the same date")
         return self
 
 class LeaveCreate(LeaveBase):
