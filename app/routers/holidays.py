@@ -13,9 +13,14 @@ except Exception as e:  # pragma: no cover
     _fpdf_import_error = e
 
 from app.models.holiday import Holiday, HolidayCreate, HolidayUpdate
+from app.models.holiday_publication import HolidayYearPublication, HolidaySnapshotItem
 from app.models.user import UserInDB
 from app.routers.auth import get_current_active_user
 from app.services.holiday_service import HolidayService, get_holiday_service
+from app.services.holiday_publication_service import (
+    HolidayPublicationService,
+    get_holiday_publication_service,
+)
 from app.services.activity_log_service import ActivityLogService, get_activity_log_service
 from app.models.activity_log import ActivityLogCreate
 
@@ -29,6 +34,154 @@ async def list_holidays(
     holiday_service: HolidayService = Depends(get_holiday_service),
 ):
     return await holiday_service.get_all_holidays()
+
+
+@router.get("/published-years", response_model=List[int])
+async def list_published_holiday_years(
+    current_user: UserInDB = Depends(get_current_active_user),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
+):
+    return await publication_service.list_published_years()
+
+
+@router.get("/publication-statuses", response_model=List[HolidayYearPublication])
+async def list_holiday_publication_statuses(
+    current_user: UserInDB = Depends(get_current_active_user),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
+    return await publication_service.list_publication_statuses()
+
+
+@router.post("/publish-year", response_model=HolidayYearPublication)
+async def publish_holiday_year(
+    year: int = Query(...),
+    current_user: UserInDB = Depends(get_current_active_user),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
+    holiday_service: HolidayService = Depends(get_holiday_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
+
+    all_holidays = await holiday_service.get_all_holidays()
+    y = int(year)
+    snapshot = [
+        HolidaySnapshotItem(
+            name=str(getattr(h, "name", "") or ""),
+            date=str(getattr(h, "date", "") or "")[:10],
+            description=getattr(h, "description", None),
+        )
+        for h in (all_holidays or [])
+        if getattr(h, "date", None)
+        and str(getattr(h, "date"))[:4].isdigit()
+        and int(str(getattr(h, "date"))[:4]) == y
+    ]
+    updated = await publication_service.set_year_published_with_snapshot(y, True, snapshot)
+
+    actor_name = current_user.full_name or current_user.username
+    await log_service.create_log(
+        ActivityLogCreate(
+            action="holiday_year_published",
+            title="Holiday year published",
+            description=f"{actor_name} published holiday year {updated.year}",
+            actor_id=str(current_user.id),
+            actor_name=actor_name,
+            entity_type="holiday_year",
+            entity_id=str(updated.year),
+            metadata={
+                "year": updated.year,
+                "published": True,
+            },
+        )
+    )
+
+    return updated
+
+
+@router.get("/published-holidays", response_model=List[HolidaySnapshotItem])
+async def get_published_holidays_for_year(
+    year: int = Query(...),
+    current_user: UserInDB = Depends(get_current_active_user),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
+    holiday_service: HolidayService = Depends(get_holiday_service),
+):
+    y = int(year)
+    snapshot = await publication_service.get_published_holidays(y)
+    if snapshot:
+        return snapshot
+
+    all_holidays = await holiday_service.get_all_holidays()
+    generated = [
+        HolidaySnapshotItem(
+            name=str(getattr(h, "name", "") or ""),
+            date=str(getattr(h, "date", "") or "")[:10],
+            description=getattr(h, "description", None),
+        )
+        for h in (all_holidays or [])
+        if getattr(h, "date", None)
+        and str(getattr(h, "date"))[:4].isdigit()
+        and int(str(getattr(h, "date"))[:4]) == y
+    ]
+
+    # If this year was published before we introduced snapshots, persist a snapshot
+    # now so future holiday edits won't affect the Holidays page until republish.
+    try:
+        if generated:
+            await publication_service.set_year_published_with_snapshot(y, True, generated)
+    except Exception:
+        pass
+
+    return generated
+
+
+@router.post("/unpublish-year", response_model=HolidayYearPublication)
+async def unpublish_holiday_year(
+    year: int = Query(...),
+    current_user: UserInDB = Depends(get_current_active_user),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
+
+    updated = await publication_service.set_year_published(int(year), False)
+
+    actor_name = current_user.full_name or current_user.username
+    await log_service.create_log(
+        ActivityLogCreate(
+            action="holiday_year_unpublished",
+            title="Holiday year unpublished",
+            description=f"{actor_name} unpublished holiday year {updated.year}",
+            actor_id=str(current_user.id),
+            actor_name=actor_name,
+            entity_type="holiday_year",
+            entity_id=str(updated.year),
+            metadata={
+                "year": updated.year,
+                "published": False,
+            },
+        )
+    )
+
+    return updated
 
 
 @router.get("/download-pdf")
@@ -269,6 +422,9 @@ async def create_holiday(
     holiday: HolidayCreate = Body(...),
     current_user: UserInDB = Depends(get_current_active_user),
     holiday_service: HolidayService = Depends(get_holiday_service),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
     if not current_user.is_admin:
@@ -278,6 +434,12 @@ async def create_holiday(
         created = await holiday_service.create_holiday(holiday)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        y = int(str(getattr(created, "date", ""))[:4])
+        await publication_service.mark_year_dirty(y)
+    except Exception:
+        pass
 
     actor_name = current_user.full_name or current_user.username
     await log_service.create_log(
@@ -305,6 +467,9 @@ async def update_holiday(
     holiday_update: HolidayUpdate = Body(...),
     current_user: UserInDB = Depends(get_current_active_user),
     holiday_service: HolidayService = Depends(get_holiday_service),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
     if not current_user.is_admin:
@@ -317,6 +482,17 @@ async def update_holiday(
         raise HTTPException(status_code=400, detail=str(e))
     if not updated:
         raise HTTPException(status_code=404, detail="Holiday not found")
+
+    try:
+        years = set()
+        if before and getattr(before, "date", None):
+            years.add(int(str(getattr(before, "date"))[:4]))
+        if getattr(updated, "date", None):
+            years.add(int(str(getattr(updated, "date"))[:4]))
+        for y in years:
+            await publication_service.mark_year_dirty(int(y))
+    except Exception:
+        pass
 
     actor_name = current_user.full_name or current_user.username
     await log_service.create_log(
@@ -345,6 +521,9 @@ async def delete_holiday(
     holiday_id: str,
     current_user: UserInDB = Depends(get_current_active_user),
     holiday_service: HolidayService = Depends(get_holiday_service),
+    publication_service: HolidayPublicationService = Depends(
+        get_holiday_publication_service
+    ),
     log_service: ActivityLogService = Depends(get_activity_log_service),
 ):
     if not current_user.is_admin:
@@ -354,6 +533,13 @@ async def delete_holiday(
     deleted = await holiday_service.delete_holiday(holiday_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Holiday not found")
+
+    try:
+        if existing and getattr(existing, "date", None):
+            y = int(str(getattr(existing, "date"))[:4])
+            await publication_service.mark_year_dirty(y)
+    except Exception:
+        pass
 
     actor_name = current_user.full_name or current_user.username
     if existing:
