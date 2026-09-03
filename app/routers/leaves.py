@@ -17,9 +17,11 @@ router = APIRouter()
 def get_request_label(leave: Leave) -> str:
     if str(leave.request_type).lower() == "wfh":
         return "WFH"
-    if str(leave.leave_type).lower() == "unpaid":
+    if str(leave.request_type).lower() == "resign":
+        return "Resignation"
+    if leave.leave_type and str(leave.leave_type).lower() == "unpaid":
         return "Loss of Pay"
-    return str(leave.leave_type)
+    return str(leave.leave_type or "")
 
 
 def iter_month_ranges(start_date: date, end_date: date):

@@ -17,6 +17,7 @@ class UserBase(BaseModel):
     is_active: bool = True
     is_manager: bool = False
     is_admin: bool = False
+    notice_period_days: int = 90
 
 class UserCreate(UserBase):
     password: str
@@ -36,6 +37,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_manager: Optional[bool] = None
     is_admin: Optional[bool] = None
+    notice_period_days: Optional[int] = None
 
 class UserInDB(UserBase):
     id: str

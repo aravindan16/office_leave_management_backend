@@ -21,6 +21,7 @@ class LeaveType(str, Enum):
 class RequestType(str, Enum):
     LEAVE = "leave"
     WFH = "wfh"
+    RESIGN = "resign"
 
 class LeaveBase(BaseModel):
     request_type: RequestType = RequestType.LEAVE
@@ -33,7 +34,7 @@ class LeaveBase(BaseModel):
 
     @model_validator(mode="after")
     def validate_request_type(self):
-        if self.request_type == RequestType.WFH:
+        if self.request_type in (RequestType.WFH, RequestType.RESIGN):
             self.leave_type = None
 
         if self.request_type == RequestType.LEAVE and self.leave_type is None:

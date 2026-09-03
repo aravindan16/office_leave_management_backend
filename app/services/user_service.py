@@ -115,9 +115,11 @@ class UserService:
             return None
         return await self.get_user_by_id(user_id)
 
-    async def get_all_users(self, exclude_admins: bool = False) -> List[User]:
+    async def get_all_users(self, exclude_admins: bool = False, include_inactive: bool = False) -> List[User]:
         users = []
-        query = {"is_active": True}
+        query = {}
+        if not include_inactive:
+            query["is_active"] = True
         if exclude_admins:
             query["is_admin"] = {"$ne": True}
 
