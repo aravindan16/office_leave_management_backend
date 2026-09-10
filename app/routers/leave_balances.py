@@ -1,3 +1,4 @@
+from app.services.testing_service import RequestVisibility, get_request_visibility
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -46,12 +47,13 @@ async def get_users_leave_balances(
     user_service: UserService = Depends(get_user_service),
     fy_start_year: Optional[int] = None,
     include_pending: bool = True,
+    visibility: RequestVisibility = Depends(get_request_visibility),
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
     users = await user_service.get_all_users(exclude_admins=True)
-    user_ids = [str(u.id) for u in users]
+    user_ids = [str(u.id) for u in visibility.filter(users, "id")]
     return await balance_service.get_balances_for_users(
         user_ids,
         fy_start_year=fy_start_year,

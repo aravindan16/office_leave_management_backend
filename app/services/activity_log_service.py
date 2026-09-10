@@ -59,16 +59,16 @@ class ActivityLogService:
         log_dict["id"] = str(result.inserted_id)
         return ActivityLog(**log_dict)
 
-    async def get_logs(self, skip: int = 0, limit: int = 50) -> List[ActivityLog]:
+    async def get_logs(self, skip: int = 0, limit: int = 50, visibility_query: Optional[dict] = None) -> List[ActivityLog]:
         raw_logs: List[dict] = []
-        cursor = self.collection.find().sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(visibility_query or {}).sort("created_at", -1).skip(skip).limit(limit)
         async for log_data in cursor:
             log_data["id"] = str(log_data.pop("_id"))
             raw_logs.append(log_data)
         raw_logs = await self._enrich_log_user_details(raw_logs)
         return [ActivityLog(**l) for l in raw_logs]
 
-    async def get_logs_for_user(self, user_id: str, skip: int = 0, limit: int = 50) -> List[ActivityLog]:
+    async def get_logs_for_user(self, user_id: str, skip: int = 0, limit: int = 50, visibility_query: Optional[dict] = None) -> List[ActivityLog]:
         raw_logs: List[dict] = []
         # Find logs where user is either the target OR the actor
         query = {
@@ -77,6 +77,8 @@ class ActivityLogService:
                 {"actor_id": str(user_id)}
             ]
         }
+        if visibility_query:
+            query = {"$and": [query, visibility_query]}
         cursor = (
             self.collection.find(query)
             .sort("created_at", -1)

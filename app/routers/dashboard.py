@@ -1,3 +1,4 @@
+from app.services.testing_service import RequestVisibility, get_request_visibility
 from datetime import date, datetime, time
 from typing import List
 
@@ -58,9 +59,10 @@ async def get_dashboard_summary(
     current_user: UserInDB = Depends(get_current_active_user),
     user_service: UserService = Depends(get_user_service),
     leave_service: LeaveService = Depends(get_leave_service),
+    visibility: RequestVisibility = Depends(get_request_visibility),
 ):
     users = await user_service.get_all_users()
-    active_users = list(users or [])
+    active_users = visibility.filter(list(users or []), "id")
     employees = [u for u in (active_users or []) if not getattr(u, "is_admin", False) and not getattr(u, "is_manager", False)]
 
     today = date.today()
@@ -141,5 +143,6 @@ async def get_dashboard_summary(
 
     return DashboardSummary(
         birthdays_this_month=birthdays[:12],
-        upcoming_approved=upcoming[:12],
+        upcoming_approved=[item for item in upcoming if item.request_type != "resign"][:12],
+        upcoming_resignations=[item for item in upcoming if item.request_type == "resign"][:8],
     )

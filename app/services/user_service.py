@@ -5,7 +5,8 @@ from app.models.user import User, UserInDB, UserCreate, UserUpdate
 from app.core.security import get_password_hash, verify_password
 from app.core.database import get_database
 from bson import ObjectId
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timezone
+from zoneinfo import ZoneInfo
 
 class UserService:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -30,8 +31,11 @@ class UserService:
         user_dict["id"] = str(result.inserted_id)
         return User(**user_dict)
 
-    async def get_user_by_email(self, email: str) -> Optional[UserInDB]:
-        user_data = await self.collection.find_one({"email": email, "is_active": True})
+    async def get_user_by_email(self, email: str, *, include_inactive: bool = False) -> Optional[UserInDB]:
+        query = {"email": email}
+        if not include_inactive:
+            query["is_active"] = True
+        user_data = await self.collection.find_one(query)
 
         if user_data:
             user_data["id"] = str(user_data.pop("_id"))
@@ -49,12 +53,46 @@ class UserService:
         return None
 
     async def authenticate_user(self, email: str, password: str) -> Optional[UserInDB]:
-        user = await self.get_user_by_email(email)
+        # Verify the password before login reports whether the account is inactive.
+        user = await self.get_user_by_email(email, include_inactive=True)
         if not user:
             return None
         if not verify_password(password, user.hashed_password):
             return None
         return user
+
+    async def deactivate_if_notice_period_ended(self, user: UserInDB) -> None:
+        if not user.is_active:
+            return
+
+        # Use the remote database clock so changing the backend laptop's date
+        # cannot expire an account. MongoDB returns localTime in UTC.
+        server_now = (await self.db.command("hello"))["localTime"]
+        if server_now.tzinfo is None:
+            server_now = server_now.replace(tzinfo=timezone.utc)
+        today = server_now.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        # The resignation saves start_date + notice_period_days as end_date.
+        # Keep access through the last working day, including pending resignations.
+        resignation = await self.db.leaves.find_one({
+            "employee_id": {"$in": [ObjectId(user.id), user.id]},
+            "request_type": "resign",
+            "status": {"$in": ["pending", "approved"]},
+            "$or": [
+                {"end_date": {"$lt": datetime.combine(today, time.min)}},
+                # Older records may contain ISO strings instead of BSON dates.
+                {"end_date": {"$lt": today.isoformat(), "$regex": r"^\d{4}-\d{2}-\d{2}"}},
+            ],
+        })
+        if resignation is None:
+            return
+
+        updated_at = server_now.astimezone(timezone.utc).replace(tzinfo=None)
+        await self.collection.update_one(
+            {"_id": ObjectId(user.id), "is_active": True},
+            {"$set": {"is_active": False, "updated_at": updated_at}},
+        )
+        user.is_active = False
+        user.updated_at = updated_at
 
     async def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
         if not ObjectId.is_valid(user_id):
@@ -115,9 +153,11 @@ class UserService:
             return None
         return await self.get_user_by_id(user_id)
 
-    async def get_all_users(self, exclude_admins: bool = False) -> List[User]:
+    async def get_all_users(self, exclude_admins: bool = False, include_inactive: bool = False) -> List[User]:
         users = []
-        query = {"is_active": True}
+        query = {}
+        if not include_inactive:
+            query["is_active"] = True
         if exclude_admins:
             query["is_admin"] = {"$ne": True}
 

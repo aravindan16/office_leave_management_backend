@@ -1,3 +1,4 @@
+from app.services.testing_service import RequestVisibility, get_request_visibility
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.models.user import User, UserCreate, UserUpdate, UserInDB, ChangePasswordRequest
@@ -52,13 +53,18 @@ async def create_user(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=List[User])
-async def get_users(current_user: UserInDB = Depends(get_current_active_user), user_service: UserService = Depends(get_user_service)):
+async def get_users(
+    include_inactive: bool = True,
+    current_user: UserInDB = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+    visibility: RequestVisibility = Depends(get_request_visibility),
+):
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return await user_service.get_all_users(exclude_admins=True)
+    return visibility.filter(await user_service.get_all_users(exclude_admins=True, include_inactive=include_inactive), "id")
 
 @router.get("/managers", response_model=List[User])
 async def get_managers(user_service: UserService = Depends(get_user_service)):

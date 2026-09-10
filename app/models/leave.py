@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic import model_validator
 from typing import Optional
 from datetime import datetime, date
@@ -21,6 +21,7 @@ class LeaveType(str, Enum):
 class RequestType(str, Enum):
     LEAVE = "leave"
     WFH = "wfh"
+    RESIGN = "resign"
 
 class LeaveBase(BaseModel):
     request_type: RequestType = RequestType.LEAVE
@@ -33,7 +34,7 @@ class LeaveBase(BaseModel):
 
     @model_validator(mode="after")
     def validate_request_type(self):
-        if self.request_type == RequestType.WFH:
+        if self.request_type in (RequestType.WFH, RequestType.RESIGN):
             self.leave_type = None
 
         if self.request_type == RequestType.LEAVE and self.leave_type is None:
@@ -56,6 +57,16 @@ class LeaveUpdate(BaseModel):
     reason: Optional[str] = None
     status: Optional[LeaveStatus] = None
     manager_comment: Optional[str] = None
+
+class ResignationNoticeUpdate(BaseModel):
+    notice_period_days: Optional[int] = Field(default=None, ge=0, strict=True)
+    end_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def require_notice_period(self):
+        if self.notice_period_days is None and self.end_date is None:
+            raise ValueError("Provide notice_period_days or end_date")
+        return self
 
 class LeaveInDB(LeaveBase):
     id: str
