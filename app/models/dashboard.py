@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 
@@ -29,3 +29,4 @@ class DashboardUpcomingItem(BaseModel):
 class DashboardSummary(BaseModel):
     birthdays_this_month: List[DashboardBirthdayItem]
     upcoming_approved: List[DashboardUpcomingItem]
+    upcoming_resignations: List[DashboardUpcomingItem] = Field(default_factory=list)

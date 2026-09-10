@@ -1,8 +1,9 @@
+from app.services.testing_service import RequestVisibility, get_request_visibility
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
-from app.models.leave import Leave, LeaveCreate, LeaveUpdate, LeaveStatus
+from app.models.leave import Leave, LeaveCreate, LeaveUpdate, LeaveStatus, RequestType, ResignationNoticeUpdate
 from app.models.user import UserInDB
 from app.services.leave_service import get_leave_service, LeaveService
 from app.services.user_service import get_user_service, UserService
@@ -13,6 +14,17 @@ from app.services.leave_balance_service import LeaveBalanceService, get_leave_ba
 from bson import ObjectId
 
 router = APIRouter()
+
+async def ensure_no_active_resignation(leave_service: LeaveService, employee_id: str, exclude_id: str = None):
+    query = {
+        "employee_id": {"$in": [ObjectId(str(employee_id)), str(employee_id)]},
+        "request_type": RequestType.RESIGN.value,
+        "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
+    }
+    if exclude_id is not None:
+        query["_id"] = {"$ne": ObjectId(str(exclude_id))}
+    if await leave_service.collection.find_one(query):
+        raise HTTPException(status_code=400, detail="A pending or approved resignation already exists for this employee.")
 
 def get_request_label(leave: Leave) -> str:
     if str(leave.request_type).lower() == "wfh":
@@ -56,6 +68,12 @@ async def create_leave_request(
     balance_service: LeaveBalanceService = Depends(get_leave_balance_service),
     log_service: ActivityLogService = Depends(get_activity_log_service)
 ):
+    if leave.request_type == RequestType.RESIGN:
+        await ensure_no_active_resignation(leave_service, current_user.id)
+        if current_user.notice_period_days < 0:
+            raise HTTPException(status_code=400, detail="Your notice period must be zero or more days")
+        leave.end_date = leave.start_date + timedelta(days=current_user.notice_period_days)
+
     if leave.manager_id and not ObjectId.is_valid(str(leave.manager_id)):
         raise HTTPException(status_code=400, detail="Invalid manager ID")
     
@@ -69,21 +87,23 @@ async def create_leave_request(
             raise HTTPException(status_code=400, detail="No managers available")
         leave.manager_id = managers[0].id
 
-    # Prevent duplicate/overlapping requests for the same dates.
-    start_dt = datetime.combine(leave.start_date, time.min)
-    end_dt = datetime.combine(leave.end_date, time.max)
-    overlap_query = {
-        "employee_id": ObjectId(str(current_user.id)),
-        "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
-        "start_date": {"$lte": end_dt},
-        "end_date": {"$gte": start_dt},
-    }
-    existing_overlap = await leave_service.collection.find_one(overlap_query)
-    if existing_overlap:
-        raise HTTPException(
-            status_code=400,
-            detail="You already have a pending/approved request for the selected date(s).",
-        )
+    # Notice periods are independent of leave/WFH bookings in either direction.
+    if leave.request_type != RequestType.RESIGN:
+        start_dt = datetime.combine(leave.start_date, time.min)
+        end_dt = datetime.combine(leave.end_date, time.max)
+        overlap_query = {
+            "employee_id": ObjectId(str(current_user.id)),
+            "request_type": {"$ne": RequestType.RESIGN.value},
+            "status": {"$in": [LeaveStatus.PENDING.value, LeaveStatus.APPROVED.value]},
+            "start_date": {"$lte": end_dt},
+            "end_date": {"$gte": start_dt},
+        }
+        existing_overlap = await leave_service.collection.find_one(overlap_query)
+        if existing_overlap:
+            raise HTTPException(
+                status_code=400,
+                detail="You already have a pending/approved request for the selected date(s).",
+            )
 
     if str(leave.request_type).lower() == "wfh":
         for month_start, month_end in iter_month_ranges(leave.start_date, leave.end_date):
@@ -142,30 +162,84 @@ async def create_leave_request(
 @router.get("/", response_model=List[Leave])
 async def get_leaves(
     current_user: UserInDB = Depends(get_current_active_user),
-    leave_service: LeaveService = Depends(get_leave_service)
+    leave_service: LeaveService = Depends(get_leave_service),
+    visibility: RequestVisibility = Depends(get_request_visibility),
 ):
     if current_user.is_admin:
-        return await leave_service.get_all_leaves()
-    return await leave_service.get_leaves_by_employee(str(current_user.id))
+        return visibility.filter(await leave_service.get_all_leaves())
+    return visibility.filter(await leave_service.get_leaves_by_employee(str(current_user.id)))
 
 @router.get("/my-leaves", response_model=List[Leave])
 async def get_my_leaves(
     current_user: UserInDB = Depends(get_current_active_user),
-    leave_service: LeaveService = Depends(get_leave_service)
+    leave_service: LeaveService = Depends(get_leave_service),
+    visibility: RequestVisibility = Depends(get_request_visibility),
 ):
-    return await leave_service.get_leaves_by_employee(str(current_user.id))
+    return visibility.filter(await leave_service.get_leaves_by_employee(str(current_user.id)))
 
 @router.get("/pending-approvals", response_model=List[Leave])
 async def get_pending_leaves(
     current_user: UserInDB = Depends(get_current_active_user),
-    leave_service: LeaveService = Depends(get_leave_service)
+    leave_service: LeaveService = Depends(get_leave_service),
+    visibility: RequestVisibility = Depends(get_request_visibility),
 ):
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return await leave_service.get_pending_leaves()
+    return visibility.filter(await leave_service.get_pending_leaves())
+
+@router.put("/{leave_id}/notice-period", response_model=Leave)
+async def update_resignation_notice(
+    leave_id: str,
+    notice: ResignationNoticeUpdate,
+    current_user: UserInDB = Depends(get_current_active_user),
+    leave_service: LeaveService = Depends(get_leave_service),
+    log_service: ActivityLogService = Depends(get_activity_log_service),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    leave = await leave_service.get_leave_by_id(leave_id)
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    if leave.request_type != RequestType.RESIGN:
+        raise HTTPException(status_code=400, detail="Only resignation notice periods can be edited")
+    if leave.status == LeaveStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="Cancelled resignation requests cannot be edited")
+
+    end_date = notice.end_date
+    if notice.notice_period_days is not None:
+        try:
+            calculated_end = leave.start_date + timedelta(days=notice.notice_period_days)
+        except OverflowError:
+            raise HTTPException(status_code=400, detail="Notice period is too large")
+        if end_date is not None and end_date != calculated_end:
+            raise HTTPException(status_code=400, detail="Notice period days and end date do not match")
+        end_date = calculated_end
+    if end_date < leave.start_date:
+        raise HTTPException(status_code=400, detail="End date cannot be before the notice period start date")
+
+    updated_leave = await leave_service.update_resignation_notice(leave, end_date)
+    if not updated_leave:
+        raise HTTPException(status_code=409, detail="Request changed. Refresh and try again.")
+    await log_service.create_log(ActivityLogCreate(
+        action="resignation_notice_updated",
+        title="Resignation notice period updated",
+        description=f"{current_user.full_name or current_user.username} updated a resignation notice period",
+        actor_id=str(current_user.id),
+        actor_name=current_user.full_name or current_user.username,
+        target_user_id=str(leave.employee_id),
+        entity_type="leave",
+        entity_id=str(leave.id),
+        metadata={
+            "start_date": str(leave.start_date),
+            "previous_end_date": str(leave.end_date),
+            "end_date": str(end_date),
+            "notice_period_days": (end_date - leave.start_date).days,
+        },
+    ))
+    return updated_leave
 
 @router.put("/{leave_id}/approve", response_model=Leave)
 async def approve_leave(
@@ -186,6 +260,22 @@ async def approve_leave(
     leave = await leave_service.get_leave_by_id(leave_id)
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
+
+    if leave.request_type == RequestType.RESIGN:
+        if leave.status == LeaveStatus.REJECTED:
+            latest_resignation = await leave_service.collection.find_one(
+                {
+                    "employee_id": {"$in": [ObjectId(str(leave.employee_id)), str(leave.employee_id)]},
+                    "request_type": RequestType.RESIGN.value,
+                },
+                sort=[("created_at", -1), ("_id", -1)],
+            )
+            if not latest_resignation or str(latest_resignation["_id"]) != str(leave.id):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only the latest resignation request for this employee can be approved after rejection.",
+                )
+        await ensure_no_active_resignation(leave_service, leave.employee_id, exclude_id=leave.id)
 
     leave_type_override = None
     if as_unpaid and str(leave.request_type).lower() == "leave":

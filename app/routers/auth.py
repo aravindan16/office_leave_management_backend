@@ -41,6 +41,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), user_service: Us
     user = await user_service.get_user_by_email(email)
     if user is None:
         raise credentials_exception
+    await user_service.deactivate_if_notice_period_ended(user)
     return user
 
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:
@@ -57,6 +58,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), user_service: 
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await user_service.deactivate_if_notice_period_ended(user)
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)

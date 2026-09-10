@@ -178,6 +178,26 @@ class LeaveService:
                 continue
         return leaves
 
+    async def update_resignation_notice(self, leave: Leave, end_date: date) -> Optional[Leave]:
+        # Match the reviewed dates/status so a concurrent edit cannot be overwritten.
+        result = await self.collection.update_one(
+            {
+                "_id": ObjectId(leave.id),
+                "request_type": "resign",
+                "status": leave.status,
+                "start_date": {"$in": [datetime.combine(leave.start_date, time.min), leave.start_date.isoformat()]},
+                "end_date": {"$in": [datetime.combine(leave.end_date, time.min), leave.end_date.isoformat()]},
+            },
+            {"$set": {
+                "end_date": datetime.combine(end_date, time.min),
+                "duration_days": None,
+                "updated_at": datetime.utcnow(),
+            }},
+        )
+        if result.matched_count == 0:
+            return None
+        return await self.get_leave_by_id(leave.id)
+
     async def cancel_leave(self, leave_id: str) -> Optional[Leave]:
         return await self.update_leave_status(leave_id, LeaveStatus.CANCELLED)
 
