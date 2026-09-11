@@ -52,7 +52,7 @@ async def get_users_leave_balances(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
-    users = await user_service.get_all_users(exclude_admins=True)
+    users = await user_service.get_all_users(exclude_admins=True, include_inactive=True)
     user_ids = [str(u.id) for u in visibility.filter(users, "id")]
     return await balance_service.get_balances_for_users(
         user_ids,
